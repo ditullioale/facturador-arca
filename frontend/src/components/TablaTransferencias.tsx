@@ -55,6 +55,12 @@ export default function TablaTransferencias() {
       actualizarTransferencia(id, { cuit }),
     onSuccess: invalidar,
   })
+  const errorActualizar =
+    actualizar.error && typeof actualizar.error === 'object' && 'response' in actualizar.error
+      ? ((actualizar.error as { response?: { data?: { detail?: unknown } } }).response?.data
+          ?.detail ?? null)
+      : null
+
   const emitir = useMutation({
     mutationFn: facturar,
     onSuccess: () => {
@@ -83,6 +89,17 @@ export default function TablaTransferencias() {
             {emitir.isPending ? 'Emitiendo…' : `Facturar (${seleccion.length})`}
           </Button>
         </Stack>
+        {actualizar.isError && (
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => actualizar.reset()}>
+            No se pudo guardar el CUIT
+            {typeof errorActualizar === 'string' ? `: ${errorActualizar}` : ' (CUIT inválido)'}
+          </Alert>
+        )}
+        {emitir.isError && (
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => emitir.reset()}>
+            No se pudieron emitir las facturas seleccionadas.
+          </Alert>
+        )}
         {transferencias.length === 0 ? (
           <Alert severity="info">Todavía no importaste ningún resumen bancario.</Alert>
         ) : (

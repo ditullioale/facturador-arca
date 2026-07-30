@@ -1,6 +1,6 @@
 # Facturador ARCA
 
-Carga un resumen bancario (Excel/CSV de **Santander** o **Macro**), detecta las
+Carga un resumen bancario (**Excel, CSV o PDF** de **Santander** o **Macro**), detecta las
 **transferencias recibidas** (CUIT del emisor, importe y fecha) y emite las facturas
 electrónicas en **ARCA** con el concepto **HONORARIOS PROFESIONALES**.
 
@@ -13,7 +13,8 @@ electrónicas en **ARCA** con el concepto **HONORARIOS PROFESIONALES**.
 
 ## Stack
 
-- Backend: FastAPI, SQLAlchemy, Alembic, PostgreSQL, pandas, openpyxl, zeep (SOAP de ARCA).
+- Backend: FastAPI, SQLAlchemy, Alembic, PostgreSQL, pandas, openpyxl, pdfplumber, zeep (SOAP de
+  ARCA).
 - Frontend: React, Vite, Material UI, React Query, Axios.
 
 ## Puesta en marcha
@@ -58,7 +59,7 @@ cd frontend && npm run typecheck && npm run build
 
 ## Flujo
 
-1. `POST /api/lotes` — subida del Excel; devuelve las transferencias nuevas, duplicadas y las
+1. `POST /api/lotes` — subida del Excel/CSV/PDF; devuelve las transferencias nuevas, duplicadas y las
    que quedaron sin CUIT detectado.
 2. `PATCH /api/transferencias/{id}` — completar el CUIT faltante o marcar la transferencia como
    ignorada (no se factura).
@@ -72,4 +73,7 @@ cd frontend && npm run typecheck && npm run build
   en la representación impresa (aún no incluida).
 - Los formatos de exportación de los bancos cambian; el parser detecta encabezados por nombre de
   columna. Ante un resumen que no reconozca, agregar las palabras clave en
-  `app/services/excel_parser.py`.
+  `app/services/resumen_parser.py`.
+- PDF: se soporta el listado normal (fecha, descripción e importe en la misma línea) y el PDF
+  impreso desde una planilla ancha, donde cada bloque de páginas trae una columna y las filas se
+  reconstruyen por orden. Los PDF escaneados (sin texto) no se pueden leer.

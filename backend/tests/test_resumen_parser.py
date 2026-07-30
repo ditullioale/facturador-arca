@@ -3,8 +3,14 @@ from decimal import Decimal
 import pytest
 
 from app.services.cuit import es_cuit_valido, extraer_cuit
-from app.services.excel_parser import ErrorDeParseo, parsear_resumen
-from tests.factories import resumen_macro, resumen_santander
+from app.services.resumen_parser import ErrorDeParseo, parsear_resumen
+from tests.factories import (
+    pdf_con_lineas,
+    resumen_macro,
+    resumen_pdf_en_linea,
+    resumen_pdf_por_columnas,
+    resumen_santander,
+)
 
 
 def test_parsea_transferencias_recibidas_de_santander():
@@ -40,6 +46,36 @@ def test_huella_es_estable_para_deduplicar():
     a = parsear_resumen(resumen_macro(), "macro.xlsx").movimientos
     b = parsear_resumen(resumen_macro(), "macro copia.xlsx").movimientos
     assert [m.huella for m in a] == [m.huella for m in b]
+
+
+def test_parsea_pdf_con_una_fila_por_linea():
+    resultado = parsear_resumen(resumen_pdf_en_linea(), "movimientos.pdf")
+
+    assert resultado.banco == "santander"
+    assert [m.cuit for m in resultado.movimientos] == ["20305678903", "27123456780"]
+    assert resultado.movimientos[0].importe == Decimal("150000.50")
+    assert resultado.movimientos[0].fecha.isoformat() == "2026-07-30"
+    # Las transferencias salientes y los débitos con signo negativo quedan afuera.
+    descripciones = " ".join(m.descripcion.lower() for m in resultado.movimientos)
+    assert "inmediata a proveedor" not in descripciones
+    assert "comision" not in descripciones
+
+
+def test_parsea_pdf_impreso_desde_planilla_ancha():
+    """Las columnas vienen en bloques de páginas: las filas se reconstruyen por orden."""
+    resultado = parsear_resumen(resumen_pdf_por_columnas(), "movimientos.pdf")
+
+    assert resultado.banco == "santander"
+    assert len(resultado.movimientos) == 2
+    primero, segundo = resultado.movimientos
+    assert (primero.fecha.isoformat(), primero.importe) == ("2026-07-30", Decimal("66000.00"))
+    assert (segundo.fecha.isoformat(), segundo.importe) == ("2026-07-28", Decimal("260000.00"))
+    assert segundo.cuit == "20305678903"
+
+
+def test_pdf_sin_texto_seleccionable():
+    with pytest.raises(ErrorDeParseo, match="texto seleccionable"):
+        parsear_resumen(pdf_con_lineas([[]]), "escaneado.pdf")
 
 
 def test_archivo_sin_encabezados_reconocibles():

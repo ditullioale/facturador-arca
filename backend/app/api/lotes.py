@@ -5,11 +5,11 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import Lote, Transferencia
 from app.schemas import LoteOut, ResultadoImportacion, TransferenciaOut
-from app.services.excel_parser import ErrorDeParseo, parsear_resumen
+from app.services.resumen_parser import ErrorDeParseo, parsear_resumen
 
 router = APIRouter(prefix="/api/lotes", tags=["lotes"])
 
-EXTENSIONES = (".xlsx", ".xlsm", ".xls", ".csv")
+EXTENSIONES = (".xlsx", ".xlsm", ".xls", ".csv", ".pdf")
 
 
 @router.post("", response_model=ResultadoImportacion, status_code=status.HTTP_201_CREATED)

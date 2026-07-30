@@ -1,4 +1,4 @@
-from tests.factories import resumen_macro, resumen_santander
+from tests.factories import resumen_macro, resumen_pdf_en_linea, resumen_santander
 
 
 def _subir(client, contenido: bytes, nombre: str):
@@ -26,6 +26,27 @@ def test_importar_y_facturar_flujo_completo(client):
         assert factura["concepto_descripcion"] == "HONORARIOS PROFESIONALES"
         # ARCA no informa domicilio en el padrón simulado: se autocompleta.
         assert factura["domicilio"] == "Arroyo Seco"
+
+
+def test_importar_resumen_en_pdf(client):
+    respuesta = _subir(client, resumen_pdf_en_linea(), "movimientos.pdf")
+    assert respuesta.status_code == 201
+    datos = respuesta.json()
+    assert datos["lote"]["banco"] == "santander"
+    assert datos["nuevas"] == 2
+    assert datos["sin_cuit"] == 0
+
+    facturas = client.post(
+        "/api/transferencias/facturar",
+        json={"transferencia_ids": [t["id"] for t in datos["transferencias"]]},
+    ).json()
+    assert [f["estado"] for f in facturas] == ["emitida", "emitida"]
+
+
+def test_formato_no_soportado(client):
+    respuesta = _subir(client, b"cualquier cosa", "resumen.docx")
+    assert respuesta.status_code == 400
+    assert ".pdf" in respuesta.json()["detail"]
 
 
 def test_reimportar_el_mismo_resumen_no_duplica(client):

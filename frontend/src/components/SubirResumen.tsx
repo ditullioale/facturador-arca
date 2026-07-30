@@ -39,7 +39,7 @@ export default function SubirResumen() {
           1. Subir resumen bancario
         </Typography>
         <Typography variant="body2" color="text.secondary" gutterBottom>
-          Excel o CSV exportado de Santander o Macro. Se detectan las transferencias recibidas
+          Excel, CSV o PDF exportado de Santander o Macro. Se detectan las transferencias recibidas
           (CUIT del emisor, importe y fecha).
         </Typography>
         <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 2 }}>
@@ -55,7 +55,7 @@ export default function SubirResumen() {
             ref={inputRef}
             type="file"
             hidden
-            accept=".xlsx,.xlsm,.xls,.csv"
+            accept=".xlsx,.xlsm,.xls,.csv,.pdf"
             onChange={(e) => {
               const archivo = e.target.files?.[0]
               if (archivo) mutacion.mutate(archivo)

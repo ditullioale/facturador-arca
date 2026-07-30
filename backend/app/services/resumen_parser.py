@@ -1,8 +1,12 @@
-"""Parseo de resúmenes bancarios en Excel/CSV (Santander, Macro y formatos similares).
+"""Parseo de resúmenes bancarios en Excel/CSV/PDF (Santander, Macro y formatos similares).
 
 Los bancos exportan planillas con encabezados en filas variables y nombres de columna
 distintos, por lo que el parser detecta el encabezado y mapea las columnas por nombre
 en lugar de asumir posiciones fijas.
+
+Para PDF hay dos formas posibles: el listado normal, donde fecha, descripción e importe
+viven en la misma línea, y el PDF impreso desde una planilla ancha, donde cada bloque de
+páginas trae una columna distinta y las filas hay que reconstruirlas por orden.
 """
 
 from __future__ import annotations
@@ -16,8 +20,14 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 import pandas as pd
+import pdfplumber
 
 from app.services.cuit import extraer_cuit, normalizar_cuit
+
+RE_FECHA = re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
+RE_IMPORTE_FINAL = re.compile(
+    r"(-?\$?\s?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|-?\$?\s?\d+[.,]\d{2})\s*$"
+)
 
 PALABRAS_ENCABEZADO = (
     "fecha",
@@ -57,7 +67,8 @@ PALABRAS_DESCRIPCION = (
     "ordenante",
 )
 
-BANCOS = {"santander": "santander", "macro": "macro"}
+# Claves que identifican al banco en el encabezado del resumen ("work cafe" es Santander).
+BANCOS = {"santander": "santander", "work cafe": "santander", "macro": "macro"}
 
 
 @dataclass
@@ -107,14 +118,17 @@ def _leer_planilla(contenido: bytes, nombre_archivo: str) -> pd.DataFrame:
     return pd.read_excel(io.BytesIO(contenido), header=None, dtype=object, engine=motor)
 
 
-def _detectar_banco(df: pd.DataFrame, nombre_archivo: str) -> str:
-    texto = _normalizar(nombre_archivo) + " " + " ".join(
-        _normalizar(v) for v in df.head(15).to_numpy().flatten()
-    )
+def _detectar_banco_en_texto(texto: str) -> str:
+    normalizado = _normalizar(texto)
     for clave, banco in BANCOS.items():
-        if clave in texto:
+        if clave in normalizado:
             return banco
     return "desconocido"
+
+
+def _detectar_banco(df: pd.DataFrame, nombre_archivo: str) -> str:
+    celdas = " ".join(_normalizar(v) for v in df.head(15).to_numpy().flatten())
+    return _detectar_banco_en_texto(f"{nombre_archivo} {celdas}")
 
 
 def _fila_encabezado(df: pd.DataFrame) -> int:
@@ -190,6 +204,122 @@ def _a_fecha(valor: object) -> date | None:
     return marca.date()
 
 
+def _lineas_pdf(contenido: bytes) -> list[str]:
+    try:
+        with pdfplumber.open(io.BytesIO(contenido)) as pdf:
+            paginas = [pagina.extract_text() or "" for pagina in pdf.pages]
+    except Exception as exc:  # noqa: BLE001 - pdfplumber levanta excepciones heterogéneas
+        raise ErrorDeParseo(f"No se pudo leer el PDF: {exc}") from exc
+    lineas = [linea.strip() for pagina in paginas for linea in pagina.split("\n")]
+    if not any(lineas):
+        raise ErrorDeParseo(
+            "El PDF no tiene texto seleccionable (parece escaneado). Exportá el resumen en "
+            "Excel/CSV o en un PDF de texto."
+        )
+    return [linea for linea in lineas if linea]
+
+
+def _importe_final(linea: str) -> tuple[Decimal, str] | None:
+    """Separa el importe del final de la línea y devuelve (importe, resto de la línea)."""
+    match = RE_IMPORTE_FINAL.search(linea)
+    if match is None:
+        return None
+    importe = _a_decimal(match.group(1))
+    if importe is None:
+        return None
+    return importe, linea[: match.start()].strip()
+
+
+def _movimiento(fecha: date, importe: Decimal, descripcion: str) -> MovimientoParseado | None:
+    if importe <= 0:
+        return None
+    cuit = extraer_cuit(descripcion)
+    if not _es_transferencia(descripcion, cuit is not None):
+        return None
+    return MovimientoParseado(
+        fecha=fecha, importe=importe, descripcion=descripcion[:500], cuit=cuit
+    )
+
+
+def _movimientos_en_linea(lineas: list[str]) -> list[MovimientoParseado]:
+    """PDF con una fila por línea: fecha, descripción e importe juntos."""
+    movimientos: list[MovimientoParseado] = []
+    for linea in lineas:
+        match_fecha = RE_FECHA.search(linea)
+        partido = _importe_final(linea)
+        if match_fecha is None or partido is None:
+            continue
+        fecha = _a_fecha(match_fecha.group(0))
+        if fecha is None:
+            continue
+        importe, resto = partido
+        descripcion = _sin_fechas(resto)
+        movimiento = _movimiento(fecha, importe, descripcion)
+        if movimiento is not None:
+            movimientos.append(movimiento)
+    return movimientos
+
+
+def _movimientos_por_columnas(lineas: list[str]) -> list[MovimientoParseado]:
+    """PDF impreso desde una planilla ancha: las columnas quedan en bloques de páginas.
+
+    Se reconstruyen las filas por orden: la enésima línea de fechas corresponde al enésimo
+    movimiento con descripción e importe. Las líneas que son sólo un número (columna de
+    saldo) se descartan.
+    """
+    fechas: list[date] = []
+    detalles: list[tuple[Decimal, str]] = []
+    for linea in lineas:
+        match_fecha = RE_FECHA.match(linea)
+        partido = _importe_final(linea)
+        if match_fecha is not None and partido is None:
+            fecha = _a_fecha(match_fecha.group(0))
+            if fecha is not None:
+                fechas.append(fecha)
+        elif partido is not None and match_fecha is None:
+            importe, resto = partido
+            if resto:
+                detalles.append((importe, resto))
+
+    if not fechas or not detalles:
+        return []
+    if len(fechas) != len(detalles):
+        raise ErrorDeParseo(
+            f"El PDF tiene {len(fechas)} fechas y {len(detalles)} movimientos: no se pueden "
+            "emparejar las filas. Exportá el resumen en Excel/CSV."
+        )
+
+    movimientos = []
+    for fecha, (importe, descripcion) in zip(fechas, detalles, strict=True):
+        movimiento = _movimiento(fecha, importe, descripcion)
+        if movimiento is not None:
+            movimientos.append(movimiento)
+    return movimientos
+
+
+def _sin_fechas(texto: str) -> str:
+    return RE_FECHA.sub("", texto).strip(" -\t")
+
+
+def _parsear_pdf(contenido: bytes, nombre_archivo: str) -> ResultadoParseo:
+    lineas = _lineas_pdf(contenido)
+    banco = _detectar_banco_en_texto(" ".join([nombre_archivo, *lineas[:60]]))
+    en_linea = _movimientos_en_linea(lineas)
+    try:
+        por_columnas = _movimientos_por_columnas(lineas)
+    except ErrorDeParseo:
+        if not en_linea:
+            raise
+        por_columnas = []
+    # Un PDF de columnas partidas puede tener alguna línea suelta con fecha e importe juntos:
+    # se queda la lectura que reconstruye más movimientos.
+    movimientos = max(en_linea, por_columnas, key=len)
+    if not movimientos and not any(RE_FECHA.search(linea) for linea in lineas):
+        raise ErrorDeParseo("No se encontraron movimientos con fecha e importe en el PDF.")
+    filas = sum(1 for linea in lineas if RE_FECHA.search(linea))
+    return ResultadoParseo(banco=banco, cantidad_filas=filas, movimientos=movimientos)
+
+
 def _es_transferencia(descripcion: str, tiene_cuit: bool) -> bool:
     texto = _normalizar(descripcion)
     if any(p in texto for p in PALABRAS_TRANSFERENCIA):
@@ -199,6 +329,8 @@ def _es_transferencia(descripcion: str, tiene_cuit: bool) -> bool:
 
 def parsear_resumen(contenido: bytes, nombre_archivo: str) -> ResultadoParseo:
     """Extrae las transferencias recibidas (crédito) de un resumen bancario."""
+    if nombre_archivo.lower().endswith(".pdf"):
+        return _parsear_pdf(contenido, nombre_archivo)
     df = _leer_planilla(contenido, nombre_archivo)
     if df.empty:
         raise ErrorDeParseo("El archivo está vacío.")
