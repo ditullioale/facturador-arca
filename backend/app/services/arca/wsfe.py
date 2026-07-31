@@ -14,6 +14,7 @@ from decimal import Decimal
 from typing import Protocol
 
 import zeep
+from zeep.transports import Transport
 
 from app.services.arca.wsaa import ClienteWsaa, ErrorArca
 
@@ -117,7 +118,9 @@ class FacturadorArca:
     def __init__(self, modo: str, cuit_emisor: str, wsaa: ClienteWsaa) -> None:
         if modo not in URLS_WSFE:
             raise ErrorArca(f"Modo de ARCA inválido para WSFE: {modo}")
-        self._cliente = zeep.Client(URLS_WSFE[modo])
+        self._cliente = zeep.Client(
+            URLS_WSFE[modo], transport=Transport(timeout=15, operation_timeout=15)
+        )
         self._cuit_emisor = int(cuit_emisor)
         self._wsaa = wsaa
 

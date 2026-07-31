@@ -100,6 +100,17 @@ def _emitir_en_arca(
     return factura
 
 
+def _padron_seguro(cuit: str) -> tuple[str | None, str | None]:
+    """Consulta el padrón sin frenar la emisión: si falla (típico en homologación),
+    devuelve datos vacíos con el domicilio por defecto. El domicilio no se envía a
+    ARCA (solo se usa en la representación impresa), así que no es crítico."""
+    try:
+        datos, _ = consultar_padron(cuit)
+        return datos.razon_social, datos.domicilio
+    except ErrorArca:
+        return None, get_settings().domicilio_default
+
+
 def emitir_factura(
     db: Session, transferencia: Transferencia, confirmar_bajo_minimo: bool = False
 ) -> Factura:
@@ -126,11 +137,11 @@ def emitir_factura(
     )
     factura.cuit_receptor = transferencia.cuit
 
-    datos, _ = consultar_padron(transferencia.cuit)
-    factura.razon_social = datos.razon_social
-    factura.domicilio = datos.domicilio
-    transferencia.razon_social = datos.razon_social
-    transferencia.domicilio = datos.domicilio
+    razon_social, domicilio = _padron_seguro(transferencia.cuit)
+    factura.razon_social = razon_social
+    factura.domicilio = domicilio
+    transferencia.razon_social = razon_social
+    transferencia.domicilio = domicilio
 
     factura = _emitir_en_arca(db, factura, settings.arca_cond_iva_receptor)
     if factura.estado == "emitida":
@@ -173,9 +184,9 @@ def emitir_factura_directa(
     _validar_minimo(importe, confirmar_bajo_minimo)
 
     if not razon_social or not domicilio:
-        datos, _ = consultar_padron(receptor_cuit)
-        razon_social = razon_social or datos.razon_social
-        domicilio = domicilio or datos.domicilio
+        p_razon, p_dom = _padron_seguro(receptor_cuit)
+        razon_social = razon_social or p_razon
+        domicilio = domicilio or p_dom
 
     factura = existente or Factura(
         transferencia_id=None,
