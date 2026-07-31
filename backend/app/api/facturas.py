@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from app.schemas import ConfigOut, DatosPadronOut, FacturaOut
 from app.services.arca.wsaa import ErrorArca
 from app.services.cuit import es_cuit_valido, solo_digitos
 from app.services.facturacion import consultar_padron
+from app.services.representacion import generar_pdf
 
 router = APIRouter(prefix="/api", tags=["facturas"])
 
@@ -19,6 +21,25 @@ def listar_facturas(estado: str | None = None, db: Session = Depends(get_db)) ->
     if estado:
         consulta = consulta.where(Factura.estado == estado)
     return [FacturaOut.model_validate(f) for f in db.scalars(consulta).all()]
+
+
+@router.get("/facturas/{factura_id}/pdf")
+def factura_pdf(factura_id: int, db: Session = Depends(get_db)) -> Response:
+    factura = db.get(Factura, factura_id)
+    if factura is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Factura no encontrada")
+    if factura.estado != "emitida":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "La factura no está emitida (sin CAE): no se puede generar la representación impresa.",
+        )
+    pdf = generar_pdf(factura)
+    numero = f"{factura.punto_venta:04d}-{(factura.numero or 0):08d}"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="factura-{numero}.pdf"'},
+    )
 
 
 @router.get("/padron/{cuit}", response_model=DatosPadronOut)
@@ -47,5 +68,6 @@ def configuracion() -> ConfigOut:
         punto_venta=s.arca_punto_venta,
         tipo_comprobante=s.arca_tipo_comprobante,
         concepto_descripcion=s.arca_concepto_descripcion,
+        importe_minimo=s.arca_importe_minimo,
         domicilio_default=s.domicilio_default,
     )

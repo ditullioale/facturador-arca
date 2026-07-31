@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import facturas, lotes, transferencias
+from app.api import facturas, integracion, lotes, transferencias
 from app.config import get_settings
 
 app = FastAPI(title="Facturador ARCA", version="0.1.0")
@@ -17,6 +17,7 @@ app.add_middleware(
 app.include_router(lotes.router)
 app.include_router(transferencias.router)
 app.include_router(facturas.router)
+app.include_router(integracion.router)
 
 
 @app.get("/api/health")

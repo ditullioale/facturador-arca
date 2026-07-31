@@ -4,7 +4,10 @@ export const api = axios.create({ baseURL: '/api' })
 
 export interface Factura {
   id: number
-  transferencia_id: number
+  transferencia_id: number | null
+  origen: string
+  emisor_cuit: string | null
+  referencia_externa: string | null
   cuit_receptor: string
   razon_social: string | null
   domicilio: string | null
@@ -31,6 +34,7 @@ export interface Transferencia {
   razon_social: string | null
   domicilio: string | null
   estado: string
+  supera_minimo: boolean
   factura: Factura | null
 }
 
@@ -48,6 +52,7 @@ export interface Configuracion {
   punto_venta: number
   tipo_comprobante: number
   concepto_descripcion: string
+  importe_minimo: string
   domicilio_default: string
 }
 
@@ -76,7 +81,18 @@ export async function actualizarTransferencia(
   return data
 }
 
-export async function facturar(ids: number[]): Promise<Factura[]> {
-  const { data } = await api.post<Factura[]>('/transferencias/facturar', { transferencia_ids: ids })
+export async function facturar(
+  ids: number[],
+  confirmarBajoMinimo = false,
+): Promise<Factura[]> {
+  const { data } = await api.post<Factura[]>('/transferencias/facturar', {
+    transferencia_ids: ids,
+    confirmar_bajo_minimo: confirmarBajoMinimo,
+  })
   return data
+}
+
+/** URL de la representación impresa (PDF con QR de AFIP) de una factura emitida. */
+export function facturaPdfUrl(facturaId: number): string {
+  return `/api/facturas/${facturaId}/pdf`
 }

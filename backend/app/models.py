@@ -58,10 +58,23 @@ class Factura(Base):
     """Comprobante emitido en ARCA para una transferencia."""
 
     __tablename__ = "facturas"
-    __table_args__ = (UniqueConstraint("transferencia_id", name="uq_facturas_transferencia"),)
+    __table_args__ = (
+        UniqueConstraint("transferencia_id", name="uq_facturas_transferencia"),
+        UniqueConstraint("referencia_externa", name="uq_facturas_referencia_externa"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    transferencia_id: Mapped[int] = mapped_column(ForeignKey("transferencias.id"))
+    # La factura puede originarse en una transferencia bancaria (resumen) o en una
+    # liquidación del gestor de alquileres; por eso transferencia_id es opcional.
+    transferencia_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transferencias.id"), nullable=True
+    )
+    # "resumen_bancario" | "gestor_alquileres"
+    origen: Mapped[str] = mapped_column(String(32), default="resumen_bancario")
+    # CUIT del emisor (para integraciones multiempresa: cada inmobiliaria factura con el suyo).
+    emisor_cuit: Mapped[str | None] = mapped_column(String(11))
+    # Clave externa para idempotencia (ej. "gestor:<inmobiliaria>:<nro_liquidacion>").
+    referencia_externa: Mapped[str | None] = mapped_column(String(120), index=True)
     cuit_receptor: Mapped[str] = mapped_column(String(11))
     razon_social: Mapped[str | None] = mapped_column(String(255))
     domicilio: Mapped[str | None] = mapped_column(String(255))
@@ -77,4 +90,4 @@ class Factura(Base):
     error: Mapped[str | None] = mapped_column(String(1000))
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    transferencia: Mapped[Transferencia] = relationship(back_populates="factura")
+    transferencia: Mapped[Transferencia | None] = relationship(back_populates="factura")

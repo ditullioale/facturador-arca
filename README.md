@@ -8,6 +8,11 @@ electrónicas en **ARCA** con el concepto **HONORARIOS PROFESIONALES**.
   (configurable en `DOMICILIO_DEFAULT`).
 - Cada transferencia se factura una sola vez: se deduplica por huella (fecha + importe + CUIT +
   descripción) y hay una factura como máximo por transferencia.
+- Solo se emite la factura cuando el importe **supera** el mínimo configurado
+  (`ARCA_IMPORTE_MINIMO`, $50.000 por defecto). Por debajo, la app **pregunta si se factura o
+  no** (confirmación explícita).
+- Cada comprobante emitido tiene su **representación impresa en PDF con el código QR de AFIP**
+  (RG 4291): `GET /api/facturas/{id}/pdf`.
 - `ARCA_MODE=mock` permite usar la app completa sin certificados; los comprobantes son simulados
   y **no tienen validez fiscal**.
 
@@ -64,13 +69,43 @@ cd frontend && npm run typecheck && npm run build
 2. `PATCH /api/transferencias/{id}` — completar el CUIT faltante o marcar la transferencia como
    ignorada (no se factura).
 3. `POST /api/transferencias/facturar` — emite las facturas seleccionadas: consulta el padrón,
-   completa domicilio y pide el CAE.
+   completa domicilio y pide el CAE. Las transferencias por debajo del mínimo se omiten salvo que
+   se envíe `confirmar_bajo_minimo=true` (o `?confirmar=true` en el endpoint individual).
 4. `GET /api/facturas` — comprobantes emitidos con CAE y vencimiento.
+5. `GET /api/facturas/{id}/pdf` — representación impresa del comprobante con el QR de AFIP.
+
+## Integración con el gestor de alquileres (finart-alquileres)
+
+Cuando el gestor genera una liquidación al propietario, emite la factura de honorarios
+(comisión de la inmobiliaria) al propietario llamando a:
+
+`POST /api/integracion/liquidacion`
+
+```jsonc
+{
+  "receptor_cuit": "27123456780",   // CUIT del propietario
+  "importe": "120000.00",            // comisión de la liquidación
+  "fecha": "2026-07-31",
+  "referencia_externa": "gestor:1:LIQ-0001",  // idempotencia
+  "emisor_cuit": "20111111112",      // CUIT de la inmobiliaria (opcional)
+  "concepto_descripcion": "HONORARIOS PROFESIONALES",
+  "razon_social": "PEREZ SA",
+  "domicilio": "Calle Falsa 123",
+  "confirmar_bajo_minimo": false
+}
+```
+
+Respuesta: `{ "estado": "emitida" | "error" | "requiere_confirmacion", "mensaje": ..., "factura": ... }`.
+Es **idempotente** por `referencia_externa` (no factura dos veces la misma liquidación) y respeta
+el mínimo de $50.000: si la comisión no lo supera, devuelve `requiere_confirmacion` para que el
+gestor pregunte al usuario.
 
 ## Límites conocidos
 
 - WSFEv1 autoriza importes, no renglones: el texto del concepto se guarda en la factura y se usa
-  en la representación impresa (aún no incluida).
+  en la representación impresa en PDF (con QR de AFIP, RG 4291).
+- Emisor único por instancia: cada inmobiliaria factura con su propio CUIT y certificado, por lo
+  que la integración multiempresa usa una instancia (o credenciales) por emisor.
 - Los formatos de exportación de los bancos cambian; el parser detecta encabezados por nombre de
   columna. Ante un resumen que no reconozca, agregar las palabras clave en
   `app/services/resumen_parser.py`.

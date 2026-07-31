@@ -17,8 +17,11 @@ import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf'
+import Link from '@mui/material/Link'
 import {
   actualizarTransferencia,
+  facturaPdfUrl,
   facturar,
   getTransferencias,
   type Transferencia,
@@ -28,7 +31,20 @@ const moneda = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'AR
 
 function estadoChip(t: Transferencia) {
   if (t.estado === 'facturada' && t.factura?.cae) {
-    return <Chip size="small" color="success" label={`CAE ${t.factura.cae}`} />
+    return (
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Chip size="small" color="success" label={`CAE ${t.factura.cae}`} />
+        <Link
+          href={facturaPdfUrl(t.factura.id)}
+          target="_blank"
+          rel="noopener"
+          sx={{ display: 'inline-flex', alignItems: 'center' }}
+          title="Ver PDF con QR de AFIP"
+        >
+          <PictureAsPdfIcon fontSize="small" />
+        </Link>
+      </Stack>
+    )
   }
   if (t.factura?.estado === 'error') {
     return (
@@ -62,12 +78,29 @@ export default function TablaTransferencias() {
       : null
 
   const emitir = useMutation({
-    mutationFn: facturar,
+    mutationFn: ({ ids, confirmar }: { ids: number[]; confirmar: boolean }) =>
+      facturar(ids, confirmar),
     onSuccess: () => {
       setSeleccion([])
       invalidar()
     },
   })
+
+  const emitirSeleccion = () => {
+    const bajoMinimo = transferencias.filter(
+      (t) => seleccion.includes(t.id) && !t.supera_minimo,
+    )
+    let confirmar = false
+    if (bajoMinimo.length > 0) {
+      const ok = window.confirm(
+        `${bajoMinimo.length} transferencia(s) no superan el mínimo para facturar. ` +
+          '¿Querés emitir la factura igual?',
+      )
+      if (!ok) return
+      confirmar = true
+    }
+    emitir.mutate({ ids: seleccion, confirmar })
+  }
 
   const facturables = transferencias.filter(
     (t) => t.estado === 'pendiente' && t.cuit && t.factura?.estado !== 'emitida',
@@ -84,7 +117,7 @@ export default function TablaTransferencias() {
             variant="contained"
             startIcon={<ReceiptLongIcon />}
             disabled={seleccion.length === 0 || emitir.isPending}
-            onClick={() => emitir.mutate(seleccion)}
+            onClick={emitirSeleccion}
           >
             {emitir.isPending ? 'Emitiendo…' : `Facturar (${seleccion.length})`}
           </Button>

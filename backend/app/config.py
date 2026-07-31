@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import lru_cache
 from typing import Literal
 
@@ -18,11 +19,18 @@ class Settings(BaseSettings):
     arca_tipo_comprobante: int = 11
     arca_concepto_descripcion: str = "HONORARIOS PROFESIONALES"
 
+    # Solo se emite la factura cuando el importe SUPERA este mínimo.
+    # Por debajo, la app pregunta si se factura o no (confirmación explícita).
+    arca_importe_minimo: Decimal = Decimal("50000")
+
     # "mock" permite operar sin certificados (desarrollo / demo).
     # "homologacion" y "produccion" usan los web services reales de ARCA.
     arca_mode: Literal["mock", "homologacion", "produccion"] = "mock"
     arca_cert_path: str = ""
     arca_key_path: str = ""
+    # Carpeta donde se cachea el Ticket de Acceso (TA) entre reinicios.
+    # Vacío = carpeta temporal del sistema.
+    arca_ta_dir: str = ""
 
     # Domicilio por defecto cuando el padrón de ARCA no informa uno.
     domicilio_default: str = "Arroyo Seco"

@@ -10,7 +10,11 @@ from app.schemas import (
     TransferenciaOut,
     TransferenciaUpdate,
 )
-from app.services.facturacion import SinCuitError, emitir_factura
+from app.services.facturacion import (
+    RequiereConfirmacionError,
+    SinCuitError,
+    emitir_factura,
+)
 
 router = APIRouter(prefix="/api/transferencias", tags=["transferencias"])
 
@@ -55,12 +59,17 @@ def actualizar(
 
 
 @router.post("/{transferencia_id}/facturar", response_model=FacturaOut)
-def facturar(transferencia_id: int, db: Session = Depends(get_db)) -> FacturaOut:
+def facturar(
+    transferencia_id: int, confirmar: bool = False, db: Session = Depends(get_db)
+) -> FacturaOut:
     transferencia = _obtener(db, transferencia_id)
     try:
-        factura = emitir_factura(db, transferencia)
+        factura = emitir_factura(db, transferencia, confirmar_bajo_minimo=confirmar)
     except SinCuitError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    except RequiereConfirmacionError as exc:
+        # 409: el importe no supera el mínimo; reintentar con ?confirmar=true para facturar igual.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return FacturaOut.model_validate(factura)
 
 
@@ -70,7 +79,11 @@ def facturar_lote(datos: EmisionLoteIn, db: Session = Depends(get_db)) -> list[F
     for transferencia_id in datos.transferencia_ids:
         transferencia = _obtener(db, transferencia_id)
         try:
-            facturas.append(FacturaOut.model_validate(emitir_factura(db, transferencia)))
-        except SinCuitError:
+            factura = emitir_factura(
+                db, transferencia, confirmar_bajo_minimo=datos.confirmar_bajo_minimo
+            )
+        except (SinCuitError, RequiereConfirmacionError):
+            # Sin CUIT o por debajo del mínimo sin confirmar: se omite del lote.
             continue
+        facturas.append(FacturaOut.model_validate(factura))
     return facturas

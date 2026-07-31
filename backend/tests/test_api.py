@@ -77,7 +77,14 @@ def test_completar_cuit_faltante_y_facturar(client):
     assert ok.status_code == 200
     assert ok.json()["cuit"] == "27123456780"
 
-    factura = client.post(f"/api/transferencias/{sin_cuit['id']}/facturar").json()
+    # $45.000 no supera el mínimo ($50.000): sin confirmar devuelve 409.
+    sin_confirmar = client.post(f"/api/transferencias/{sin_cuit['id']}/facturar")
+    assert sin_confirmar.status_code == 409
+
+    # Con ?confirmar=true se factura igual.
+    factura = client.post(
+        f"/api/transferencias/{sin_cuit['id']}/facturar?confirmar=true"
+    ).json()
     assert factura["estado"] == "emitida"
 
 

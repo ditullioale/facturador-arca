@@ -70,6 +70,46 @@ class FacturadorMock:
         )
 
 
+def construir_detalle(
+    solicitud: SolicitudFactura, proximo: int, hoy: date
+) -> dict[str, object]:
+    """Arma el detalle FECAEDetRequest de WSFEv1.
+
+    Importante: ``CbteFch`` (fecha del comprobante) es la fecha de EMISIÓN (hoy), no la
+    del servicio: WSFEv1 exige que la fecha del comprobante esté dentro del rango
+    permitido (± unos pocos días respecto de la autorización) y rechaza fechas viejas
+    (error 10016). El período del servicio prestado va en ``FchServDesde`` /
+    ``FchServHasta`` (la fecha de la transferencia o liquidación), y ``FchVtoPago`` se
+    fija en la fecha de emisión.
+    """
+    emision = hoy.strftime("%Y%m%d")
+    servicio = solicitud.fecha.strftime("%Y%m%d")
+    importe = float(solicitud.importe)
+    detalle: dict[str, object] = {
+        "Concepto": CONCEPTO_SERVICIOS,
+        "DocTipo": DOC_TIPO_CUIT,
+        "DocNro": int(solicitud.cuit_receptor),
+        "CbteDesde": proximo,
+        "CbteHasta": proximo,
+        "CbteFch": emision,
+        "ImpTotal": importe,
+        "ImpTotConc": 0,
+        "ImpNeto": importe,
+        "ImpOpEx": 0,
+        "ImpIVA": 0,
+        "ImpTrib": 0,
+        "FchServDesde": servicio,
+        "FchServHasta": servicio,
+        "FchVtoPago": emision,
+        "MonId": "PES",
+        "MonCotiz": 1,
+    }
+    if solicitud.tipo_comprobante not in TIPOS_SIN_IVA:
+        detalle["ImpNeto"] = importe
+        detalle["Iva"] = {"AlicIva": [{"Id": IVA_NO_GRAVADO, "BaseImp": importe, "Importe": 0}]}
+    return detalle
+
+
 class FacturadorArca:
     def __init__(self, modo: str, cuit_emisor: str, wsaa: ClienteWsaa) -> None:
         if modo not in URLS_WSFE:
@@ -91,32 +131,7 @@ class FacturadorArca:
 
     def emitir(self, solicitud: SolicitudFactura) -> ResultadoEmision:
         proximo = self.ultimo_autorizado(solicitud.punto_venta, solicitud.tipo_comprobante) + 1
-        fecha = solicitud.fecha.strftime("%Y%m%d")
-        importe = float(solicitud.importe)
-        detalle: dict[str, object] = {
-            "Concepto": CONCEPTO_SERVICIOS,
-            "DocTipo": DOC_TIPO_CUIT,
-            "DocNro": int(solicitud.cuit_receptor),
-            "CbteDesde": proximo,
-            "CbteHasta": proximo,
-            "CbteFch": fecha,
-            "ImpTotal": importe,
-            "ImpTotConc": 0,
-            "ImpNeto": importe,
-            "ImpOpEx": 0,
-            "ImpIVA": 0,
-            "ImpTrib": 0,
-            "FchServDesde": fecha,
-            "FchServHasta": fecha,
-            "FchVtoPago": fecha,
-            "MonId": "PES",
-            "MonCotiz": 1,
-        }
-        if solicitud.tipo_comprobante not in TIPOS_SIN_IVA:
-            detalle["ImpNeto"] = importe
-            detalle["Iva"] = {
-                "AlicIva": [{"Id": IVA_NO_GRAVADO, "BaseImp": importe, "Importe": 0}]
-            }
+        detalle = construir_detalle(solicitud, proximo, date.today())
 
         respuesta = self._cliente.service.FECAESolicitar(
             Auth=self._auth(),
