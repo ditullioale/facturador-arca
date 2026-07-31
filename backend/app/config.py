@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # Solo se emite la factura cuando el importe SUPERA este mínimo.
     # Por debajo, la app pregunta si se factura o no (confirmación explícita).
     arca_importe_minimo: Decimal = Decimal("50000")
+    # Consultar el padrón de ARCA para completar razón social/domicilio del receptor.
+    # En homologación el padrón suele estar caído; poner en false para no esperarlo
+    # (el domicilio no se envía a ARCA, solo se usa en el PDF).
+    arca_consultar_padron: bool = True
 
     # "mock" permite operar sin certificados (desarrollo / demo).
     # "homologacion" y "produccion" usan los web services reales de ARCA.

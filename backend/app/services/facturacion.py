@@ -104,11 +104,14 @@ def _padron_seguro(cuit: str) -> tuple[str | None, str | None]:
     """Consulta el padrón sin frenar la emisión: si falla (típico en homologación),
     devuelve datos vacíos con el domicilio por defecto. El domicilio no se envía a
     ARCA (solo se usa en la representación impresa), así que no es crítico."""
+    settings = get_settings()
+    if not settings.arca_consultar_padron:
+        return None, settings.domicilio_default
     try:
         datos, _ = consultar_padron(cuit)
         return datos.razon_social, datos.domicilio
     except ErrorArca:
-        return None, get_settings().domicilio_default
+        return None, settings.domicilio_default
 
 
 def emitir_factura(
