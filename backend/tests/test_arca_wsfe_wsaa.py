@@ -78,3 +78,18 @@ def test_materializar_pem_sin_b64_devuelve_ruta_archivo():
     from app.config import _materializar_pem
 
     assert _materializar_pem("", "/ruta/cert.crt", "arca_cert.pem") == "/ruta/cert.crt"
+
+
+def test_materializar_pem_tolera_espacios_y_saltos(tmp_path):
+    """base64 con saltos de línea/espacios (típico al copiar-pegar) se decodifica igual."""
+    import base64
+
+    from app.config import _materializar_pem
+
+    contenido = b"-----BEGIN CERTIFICATE-----\nxyz\n-----END CERTIFICATE-----\n"
+    b64 = base64.b64encode(contenido).decode()
+    # Simula copia con saltos de línea y espacios intercalados / al final.
+    sucio = b64[:10] + "\n" + b64[10:] + "\n  \n"
+    ruta = _materializar_pem(sucio, "", "arca_cert_sucio.pem")
+    with open(ruta, "rb") as f:
+        assert f.read() == contenido

@@ -67,8 +67,10 @@ def _materializar_pem(contenido_b64: str, ruta_archivo: str, nombre: str) -> str
     """
     if not contenido_b64.strip():
         return ruta_archivo
+    # Se quitan espacios y saltos de línea (al copiar/pegar suelen colarse) antes de decodificar.
+    limpio = "".join(contenido_b64.split())
     try:
-        datos = base64.b64decode(contenido_b64, validate=True)
+        datos = base64.b64decode(limpio, validate=True)
     except (ValueError, binascii.Error) as exc:
         raise ValueError(f"{nombre}: el contenido base64 es inválido: {exc}") from exc
     destino = Path(tempfile.gettempdir()) / nombre
