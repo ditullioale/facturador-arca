@@ -35,6 +35,7 @@ def facturar_liquidacion(
             concepto_descripcion=datos.concepto_descripcion,
             razon_social=datos.razon_social,
             domicilio=datos.domicilio,
+            condicion_iva_receptor=datos.condicion_iva_receptor,
             confirmar_bajo_minimo=datos.confirmar_bajo_minimo,
         )
     except RequiereConfirmacionError as exc:

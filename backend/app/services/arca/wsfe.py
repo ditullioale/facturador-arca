@@ -40,6 +40,8 @@ class SolicitudFactura:
     fecha: date
     punto_venta: int
     tipo_comprobante: int
+    # Condición frente al IVA del receptor (RG 5616). 5 = Consumidor Final.
+    condicion_iva_receptor: int = 5
 
 
 @dataclass
@@ -89,6 +91,7 @@ def construir_detalle(
         "Concepto": CONCEPTO_SERVICIOS,
         "DocTipo": DOC_TIPO_CUIT,
         "DocNro": int(solicitud.cuit_receptor),
+        "CondicionIVAReceptorId": int(solicitud.condicion_iva_receptor),
         "CbteDesde": proximo,
         "CbteHasta": proximo,
         "CbteFch": emision,

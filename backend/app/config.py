@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # 11 = Factura C, 6 = Factura B, 1 = Factura A
     arca_tipo_comprobante: int = 11
     arca_concepto_descripcion: str = "HONORARIOS PROFESIONALES"
+    # Condición frente al IVA del receptor (RG 5616), obligatorio en WSFE.
+    # 5 = Consumidor Final, 1 = Responsable Inscripto, 6 = Monotributo, 4 = Exento.
+    arca_cond_iva_receptor: int = 5
 
     # Solo se emite la factura cuando el importe SUPERA este mínimo.
     # Por debajo, la app pregunta si se factura o no (confirmación explícita).

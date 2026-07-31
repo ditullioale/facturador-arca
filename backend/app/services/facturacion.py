@@ -66,7 +66,9 @@ def consultar_padron(cuit: str) -> tuple[DatosPadron, bool]:
     return datos, autocompletado
 
 
-def _emitir_en_arca(db: Session, factura: Factura) -> Factura:
+def _emitir_en_arca(
+    db: Session, factura: Factura, condicion_iva_receptor: int
+) -> Factura:
     """Pide el CAE a ARCA para una `Factura` ya armada y persiste el resultado."""
     try:
         resultado = get_facturador().emitir(
@@ -76,6 +78,7 @@ def _emitir_en_arca(db: Session, factura: Factura) -> Factura:
                 fecha=factura.fecha_comprobante,
                 punto_venta=factura.punto_venta,
                 tipo_comprobante=factura.tipo_comprobante,
+                condicion_iva_receptor=condicion_iva_receptor,
             )
         )
     except (ErrorArca, ValueError) as exc:
@@ -129,7 +132,7 @@ def emitir_factura(
     transferencia.razon_social = datos.razon_social
     transferencia.domicilio = datos.domicilio
 
-    factura = _emitir_en_arca(db, factura)
+    factura = _emitir_en_arca(db, factura, settings.arca_cond_iva_receptor)
     if factura.estado == "emitida":
         transferencia.estado = "facturada"
         db.add(transferencia)
@@ -149,6 +152,7 @@ def emitir_factura_directa(
     concepto_descripcion: str | None = None,
     razon_social: str | None = None,
     domicilio: str | None = None,
+    condicion_iva_receptor: int | None = None,
     confirmar_bajo_minimo: bool = False,
     origen: str = "gestor_alquileres",
 ) -> Factura:
@@ -188,7 +192,8 @@ def emitir_factura_directa(
     factura.importe = Decimal(importe)
     factura.fecha_comprobante = fecha
 
-    return _emitir_en_arca(db, factura)
+    condicion = condicion_iva_receptor or settings.arca_cond_iva_receptor
+    return _emitir_en_arca(db, factura, condicion)
 
 
 def _validar_emisor(emisor_cuit: str | None) -> None:

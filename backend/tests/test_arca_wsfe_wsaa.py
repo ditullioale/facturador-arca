@@ -93,3 +93,15 @@ def test_materializar_pem_tolera_espacios_y_saltos(tmp_path):
     ruta = _materializar_pem(sucio, "", "arca_cert_sucio.pem")
     with open(ruta, "rb") as f:
         assert f.read() == contenido
+
+
+
+def test_detalle_incluye_condicion_iva_receptor():
+    from datetime import date
+
+    from app.services.arca.wsfe import SolicitudFactura, construir_detalle
+
+    sol = SolicitudFactura("27123456780", 100000, date(2026, 7, 1), 1, 11,
+                           condicion_iva_receptor=5)
+    detalle = construir_detalle(sol, 1, date(2026, 7, 31))
+    assert detalle["CondicionIVAReceptorId"] == 5

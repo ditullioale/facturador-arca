@@ -127,6 +127,7 @@ class FacturaLiquidacionIn(BaseModel):
     concepto_descripcion: str | None = None
     razon_social: str | None = None
     domicilio: str | None = None
+    condicion_iva_receptor: int | None = None
     confirmar_bajo_minimo: bool = False
 
     @field_validator("receptor_cuit", "emisor_cuit")
