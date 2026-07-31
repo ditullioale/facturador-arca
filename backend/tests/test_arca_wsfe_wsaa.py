@@ -58,3 +58,23 @@ def test_ticket_vencido_no_se_considera_vigente():
         token="T", sign="S", expira=datetime.now(timezone.utc) - timedelta(minutes=1)
     )
     assert vencido.vigente is False
+
+
+def test_materializar_pem_desde_base64(tmp_path, monkeypatch):
+    """El certificado/clave en base64 se escribe a un archivo y se devuelve su ruta."""
+    import base64
+
+    from app.config import _materializar_pem
+
+    contenido = b"-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----\n"
+    b64 = base64.b64encode(contenido).decode()
+    ruta = _materializar_pem(b64, "", "arca_cert_test.pem")
+    assert ruta.endswith("arca_cert_test.pem")
+    with open(ruta, "rb") as f:
+        assert f.read() == contenido
+
+
+def test_materializar_pem_sin_b64_devuelve_ruta_archivo():
+    from app.config import _materializar_pem
+
+    assert _materializar_pem("", "/ruta/cert.crt", "arca_cert.pem") == "/ruta/cert.crt"

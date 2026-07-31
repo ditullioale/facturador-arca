@@ -1,5 +1,10 @@
+import base64
+import binascii
+import contextlib
+import tempfile
 from decimal import Decimal
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,6 +33,11 @@ class Settings(BaseSettings):
     arca_mode: Literal["mock", "homologacion", "produccion"] = "mock"
     arca_cert_path: str = ""
     arca_key_path: str = ""
+    # Alternativa para la nube (Railway, sin filesystem persistente): certificado y
+    # clave en base64. Si están seteadas, se materializan a archivos temporales al
+    # usarlas y tienen prioridad sobre ARCA_CERT_PATH / ARCA_KEY_PATH.
+    arca_cert_b64: str = ""
+    arca_key_b64: str = ""
     # Carpeta donde se cachea el Ticket de Acceso (TA) entre reinicios.
     # Vacío = carpeta temporal del sistema.
     arca_ta_dir: str = ""
@@ -36,8 +46,36 @@ class Settings(BaseSettings):
     domicilio_default: str = "Arroyo Seco"
 
     @property
+    def cert_path_efectivo(self) -> str:
+        return _materializar_pem(self.arca_cert_b64, self.arca_cert_path, "arca_cert.pem")
+
+    @property
+    def key_path_efectivo(self) -> str:
+        return _materializar_pem(self.arca_key_b64, self.arca_key_path, "arca_key.key")
+
+    @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+
+def _materializar_pem(contenido_b64: str, ruta_archivo: str, nombre: str) -> str:
+    """Devuelve la ruta al PEM a usar.
+
+    Si ``contenido_b64`` tiene contenido, lo decodifica y lo escribe a un archivo
+    temporal (para entornos sin filesystem persistente como Railway) y devuelve esa
+    ruta. Si no, devuelve ``ruta_archivo`` (uso local con archivos en disco).
+    """
+    if not contenido_b64.strip():
+        return ruta_archivo
+    try:
+        datos = base64.b64decode(contenido_b64, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError(f"{nombre}: el contenido base64 es inválido: {exc}") from exc
+    destino = Path(tempfile.gettempdir()) / nombre
+    destino.write_bytes(datos)
+    with contextlib.suppress(OSError):
+        destino.chmod(0o600)
+    return str(destino)
 
 
 @lru_cache

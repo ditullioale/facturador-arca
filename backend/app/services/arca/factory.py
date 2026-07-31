@@ -9,7 +9,9 @@ from app.services.arca.wsfe import Facturador, FacturadorArca, FacturadorMock
 @lru_cache
 def _wsaa() -> ClienteWsaa:
     s = get_settings()
-    return ClienteWsaa(s.arca_mode, s.arca_cert_path, s.arca_key_path, s.arca_ta_dir or None)
+    return ClienteWsaa(
+        s.arca_mode, s.cert_path_efectivo, s.key_path_efectivo, s.arca_ta_dir or None
+    )
 
 
 @lru_cache
