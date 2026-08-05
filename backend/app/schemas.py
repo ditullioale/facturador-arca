@@ -21,6 +21,7 @@ class FacturaOut(BaseModel):
     tipo_comprobante: int
     punto_venta: int
     numero: int | None
+    numero_intentado: int | None = None
     importe: Decimal
     fecha_comprobante: date
     cae: str | None
@@ -147,3 +148,31 @@ class ResultadoFacturacion(BaseModel):
     estado: str  # emitida | error | requiere_confirmacion
     mensaje: str | None = None
     factura: FacturaOut | None = None
+
+
+class ResultadoTransferencia(BaseModel):
+    """Resultado por cada transferencia en una emisión en lote (no oculta lo que quedó afuera)."""
+
+    transferencia_id: int
+    estado: str  # emitida | error | revisar | sin_cuit | requiere_confirmacion
+    mensaje: str | None = None
+    factura: FacturaOut | None = None
+
+
+class AuditoriaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    factura_id: int | None
+    operacion: str
+    modo: str
+    emisor_cuit: str | None
+    receptor_cuit: str | None
+    punto_venta: int | None
+    tipo_comprobante: int | None
+    numero: int | None
+    importe: Decimal | None
+    resultado: str
+    cae: str | None
+    mensaje: str | None
+    creado_en: datetime | None

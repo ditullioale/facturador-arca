@@ -18,14 +18,15 @@ def test_importar_y_facturar_flujo_completo(client):
     facturables = [t["id"] for t in datos["transferencias"] if t["cuit"]]
     emision = client.post("/api/transferencias/facturar", json={"transferencia_ids": facturables})
     assert emision.status_code == 200
-    facturas = emision.json()
-    assert len(facturas) == 2
-    for factura in facturas:
-        assert factura["estado"] == "emitida"
-        assert factura["cae"]
-        assert factura["concepto_descripcion"] == "HONORARIOS PROFESIONALES"
+    resultados = emision.json()
+    assert len(resultados) == 2
+    for r in resultados:
+        assert r["estado"] == "emitida"
+        f = r["factura"]
+        assert f["cae"]
+        assert f["concepto_descripcion"] == "HONORARIOS PROFESIONALES"
         # ARCA no informa domicilio en el padrón simulado: se autocompleta.
-        assert factura["domicilio"] == "Arroyo Seco"
+        assert f["domicilio"] == "Arroyo Seco"
 
 
 def test_importar_resumen_en_pdf(client):

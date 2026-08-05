@@ -23,7 +23,7 @@ from app.models import Factura, Transferencia
 from app.services.arca import get_facturador, get_padron
 from app.services.arca.padron import DatosPadron
 from app.services.arca.wsaa import ErrorArca
-from app.services.arca.wsfe import SolicitudFactura
+from app.services.arca.wsfe import ResultadoDesconocido, SolicitudFactura
 
 
 class SinCuitError(ValueError):
@@ -66,12 +66,70 @@ def consultar_padron(cuit: str) -> tuple[DatosPadron, bool]:
     return datos, autocompletado
 
 
+def _auditar(db: Session, factura: Factura, operacion: str, resultado: str) -> None:
+    from app.models import AuditoriaArca
+
+    s = get_settings()
+    db.add(
+        AuditoriaArca(
+            factura_id=factura.id,
+            operacion=operacion,
+            modo=s.arca_mode,
+            emisor_cuit=factura.emisor_cuit or (s.arca_cuit or None),
+            receptor_cuit=factura.cuit_receptor,
+            punto_venta=factura.punto_venta,
+            tipo_comprobante=factura.tipo_comprobante,
+            numero=factura.numero or factura.numero_intentado,
+            importe=factura.importe,
+            resultado=resultado,
+            cae=factura.cae,
+            mensaje=(factura.error or None),
+        )
+    )
+
+
+def _finalizar(db: Session, factura: Factura, operacion: str, resultado: str) -> Factura:
+    db.add(factura)
+    db.flush()  # asegura factura.id para la auditoría
+    _auditar(db, factura, operacion, resultado)
+    db.commit()
+    db.refresh(factura)
+    return factura
+
+
 def _emitir_en_arca(
     db: Session, factura: Factura, condicion_iva_receptor: int
 ) -> Factura:
-    """Pide el CAE a ARCA para una `Factura` ya armada y persiste el resultado."""
+    """Pide el CAE a ARCA para una `Factura` ya armada y persiste el resultado.
+
+    Idempotencia anti-duplicado: si un intento anterior quedó con resultado desconocido
+    (timeout), antes de reintentar se consulta a ARCA (FECompConsultar) si ese número ya
+    fue autorizado; si lo fue, se adopta el CAE en vez de emitir de nuevo.
+    """
+    facturador = get_facturador()
+
+    if factura.numero_intentado:
+        try:
+            recon = facturador.consultar(
+                factura.punto_venta, factura.tipo_comprobante, factura.numero_intentado
+            )
+        except ErrorArca:
+            # No se pudo verificar: se mantiene en "revisar" (no se reintenta a ciegas).
+            factura.estado = "revisar"
+            return _finalizar(db, factura, "reconciliar", "revisar")
+        if recon is not None:
+            factura.numero = recon.numero
+            factura.cae = recon.cae
+            factura.cae_vencimiento = recon.cae_vencimiento
+            factura.estado = "emitida"
+            factura.error = None
+            factura.numero_intentado = None
+            return _finalizar(db, factura, "reconciliar", "reconciliada")
+        # No existía en ARCA: es seguro reintentar.
+        factura.numero_intentado = None
+
     try:
-        resultado = get_facturador().emitir(
+        resultado = facturador.emitir(
             SolicitudFactura(
                 cuit_receptor=factura.cuit_receptor,
                 importe=factura.importe,
@@ -81,23 +139,27 @@ def _emitir_en_arca(
                 condicion_iva_receptor=condicion_iva_receptor,
             )
         )
+    except ResultadoDesconocido as exc:
+        factura.estado = "revisar"
+        factura.numero_intentado = exc.numero
+        factura.error = (
+            "Resultado desconocido (timeout de ARCA): se reconciliará con FECompConsultar "
+            "antes de reintentar para no duplicar."
+        )
+        return _finalizar(db, factura, "emitir", "revisar")
     except (ErrorArca, ValueError) as exc:
         factura.estado = "error"
         factura.error = str(exc)[:1000]
-        db.add(factura)
-        db.commit()
-        db.refresh(factura)
-        return factura
+        factura.numero_intentado = None
+        return _finalizar(db, factura, "emitir", "error")
 
     factura.numero = resultado.numero
     factura.cae = resultado.cae
     factura.cae_vencimiento = resultado.cae_vencimiento
     factura.estado = "emitida"
     factura.error = None
-    db.add(factura)
-    db.commit()
-    db.refresh(factura)
-    return factura
+    factura.numero_intentado = None
+    return _finalizar(db, factura, "emitir", "emitida")
 
 
 def _padron_seguro(cuit: str) -> tuple[str | None, str | None]:

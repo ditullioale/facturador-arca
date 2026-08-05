@@ -33,6 +33,8 @@ async def importar_resumen(
         banco=resultado.banco,
         cantidad_filas=resultado.cantidad_filas,
         cantidad_transferencias=len(resultado.movimientos),
+        archivo=contenido,
+        content_type=archivo.content_type,
     )
     db.add(lote)
     db.flush()
@@ -76,6 +78,12 @@ async def importar_resumen(
 
 
 @router.get("", response_model=list[LoteOut])
-def listar_lotes(db: Session = Depends(get_db)) -> list[LoteOut]:
-    lotes = db.scalars(select(Lote).order_by(Lote.id.desc())).all()
+def listar_lotes(
+    limit: int = 50, offset: int = 0, db: Session = Depends(get_db)
+) -> list[LoteOut]:
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    lotes = db.scalars(
+        select(Lote).order_by(Lote.id.desc()).limit(limit).offset(offset)
+    ).all()
     return [LoteOut.model_validate(lote) for lote in lotes]

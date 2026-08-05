@@ -7,6 +7,7 @@ from app.models import Transferencia
 from app.schemas import (
     EmisionLoteIn,
     FacturaOut,
+    ResultadoTransferencia,
     TransferenciaOut,
     TransferenciaUpdate,
 )
@@ -30,13 +31,18 @@ def _obtener(db: Session, transferencia_id: int) -> Transferencia:
 def listar(
     estado: str | None = None,
     lote_id: int | None = None,
+    limit: int = 50,
+    offset: int = 0,
     db: Session = Depends(get_db),
 ) -> list[TransferenciaOut]:
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
     consulta = select(Transferencia).order_by(Transferencia.fecha.desc(), Transferencia.id.desc())
     if estado:
         consulta = consulta.where(Transferencia.estado == estado)
     if lote_id:
         consulta = consulta.where(Transferencia.lote_id == lote_id)
+    consulta = consulta.limit(limit).offset(offset)
     return [TransferenciaOut.model_validate(t) for t in db.scalars(consulta).all()]
 
 
@@ -73,17 +79,36 @@ def facturar(
     return FacturaOut.model_validate(factura)
 
 
-@router.post("/facturar", response_model=list[FacturaOut])
-def facturar_lote(datos: EmisionLoteIn, db: Session = Depends(get_db)) -> list[FacturaOut]:
-    facturas: list[FacturaOut] = []
-    for transferencia_id in datos.transferencia_ids:
-        transferencia = _obtener(db, transferencia_id)
+@router.post("/facturar", response_model=list[ResultadoTransferencia])
+def facturar_lote(
+    datos: EmisionLoteIn, db: Session = Depends(get_db)
+) -> list[ResultadoTransferencia]:
+    """Emite un lote y devuelve el resultado de CADA transferencia (no oculta lo omitido)."""
+    resultados: list[ResultadoTransferencia] = []
+    for tid in datos.transferencia_ids:
+        transferencia = _obtener(db, tid)
         try:
             factura = emitir_factura(
                 db, transferencia, confirmar_bajo_minimo=datos.confirmar_bajo_minimo
             )
-        except (SinCuitError, RequiereConfirmacionError):
-            # Sin CUIT o por debajo del mínimo sin confirmar: se omite del lote.
+        except SinCuitError as exc:
+            resultados.append(
+                ResultadoTransferencia(transferencia_id=tid, estado="sin_cuit", mensaje=str(exc))
+            )
             continue
-        facturas.append(FacturaOut.model_validate(factura))
-    return facturas
+        except RequiereConfirmacionError as exc:
+            resultados.append(
+                ResultadoTransferencia(
+                    transferencia_id=tid, estado="requiere_confirmacion", mensaje=str(exc)
+                )
+            )
+            continue
+        resultados.append(
+            ResultadoTransferencia(
+                transferencia_id=tid,
+                estado=factura.estado,
+                mensaje=factura.error,
+                factura=FacturaOut.model_validate(factura),
+            )
+        )
+    return resultados

@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import Factura
-from app.schemas import ConfigOut, DatosPadronOut, FacturaOut
+from app.models import AuditoriaArca, Factura
+from app.schemas import AuditoriaOut, ConfigOut, DatosPadronOut, FacturaOut
 from app.services.arca.wsaa import ErrorArca
 from app.services.cuit import es_cuit_valido, solo_digitos
 from app.services.facturacion import consultar_padron
@@ -16,11 +16,31 @@ router = APIRouter(prefix="/api", tags=["facturas"])
 
 
 @router.get("/facturas", response_model=list[FacturaOut])
-def listar_facturas(estado: str | None = None, db: Session = Depends(get_db)) -> list[FacturaOut]:
+def listar_facturas(
+    estado: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+) -> list[FacturaOut]:
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
     consulta = select(Factura).order_by(Factura.id.desc())
     if estado:
         consulta = consulta.where(Factura.estado == estado)
+    consulta = consulta.limit(limit).offset(offset)
     return [FacturaOut.model_validate(f) for f in db.scalars(consulta).all()]
+
+
+@router.get("/auditoria", response_model=list[AuditoriaOut])
+def listar_auditoria(
+    limit: int = 50, offset: int = 0, db: Session = Depends(get_db)
+) -> list[AuditoriaOut]:
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    consulta = (
+        select(AuditoriaArca).order_by(AuditoriaArca.id.desc()).limit(limit).offset(offset)
+    )
+    return [AuditoriaOut.model_validate(a) for a in db.scalars(consulta).all()]
 
 
 @router.get("/facturas/{factura_id}/pdf")

@@ -4,8 +4,10 @@ from decimal import Decimal
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    LargeBinary,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -24,6 +26,9 @@ class Lote(Base):
     banco: Mapped[str] = mapped_column(String(32))
     cantidad_filas: Mapped[int] = mapped_column(default=0)
     cantidad_transferencias: Mapped[int] = mapped_column(default=0)
+    # Se guarda el archivo original subido (auditoría / reproceso).
+    archivo: Mapped[bytes | None] = mapped_column(LargeBinary)
+    content_type: Mapped[str | None] = mapped_column(String(120))
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     transferencias: Mapped[list["Transferencia"]] = relationship(back_populates="lote")
@@ -82,6 +87,9 @@ class Factura(Base):
     tipo_comprobante: Mapped[int]
     punto_venta: Mapped[int]
     numero: Mapped[int | None]
+    # Número que se intentó autorizar cuando el resultado quedó "desconocido" (timeout).
+    # Se reconcilia con FECompConsultar antes de reintentar para no duplicar.
+    numero_intentado: Mapped[int | None]
     importe: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     fecha_comprobante: Mapped[date]
     cae: Mapped[str | None] = mapped_column(String(32))
@@ -91,3 +99,24 @@ class Factura(Base):
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     transferencia: Mapped[Transferencia | None] = relationship(back_populates="factura")
+
+
+class AuditoriaArca(Base):
+    """Registro de cada interacción con ARCA (emisión / consulta), para auditoría."""
+
+    __tablename__ = "auditoria_arca"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    factura_id: Mapped[int | None] = mapped_column(ForeignKey("facturas.id"))
+    operacion: Mapped[str] = mapped_column(String(32))  # emitir | reconciliar
+    modo: Mapped[str] = mapped_column(String(16))       # mock | homologacion | produccion
+    emisor_cuit: Mapped[str | None] = mapped_column(String(11))
+    receptor_cuit: Mapped[str | None] = mapped_column(String(11))
+    punto_venta: Mapped[int | None]
+    tipo_comprobante: Mapped[int | None]
+    numero: Mapped[int | None]
+    importe: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    resultado: Mapped[str] = mapped_column(String(24))  # emitida | error | revisar | reconciliada
+    cae: Mapped[str | None] = mapped_column(String(32))
+    mensaje: Mapped[str | None] = mapped_column(Text)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

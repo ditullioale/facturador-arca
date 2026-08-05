@@ -53,8 +53,22 @@ class ResultadoEmision:
     observaciones: list[str]
 
 
+class ResultadoDesconocido(Exception):
+    """El envío a ARCA no obtuvo respuesta (timeout/red): el comprobante PUEDE haberse
+    autorizado. Guarda el número intentado para reconciliar con FECompConsultar antes de
+    reintentar y no duplicar."""
+
+    def __init__(self, numero: int) -> None:
+        super().__init__(f"Resultado desconocido para el comprobante {numero}")
+        self.numero = numero
+
+
 class Facturador(Protocol):
     def emitir(self, solicitud: SolicitudFactura) -> ResultadoEmision: ...
+
+    def consultar(
+        self, punto_venta: int, tipo_comprobante: int, numero: int
+    ) -> ResultadoEmision | None: ...
 
 
 class FacturadorMock:
@@ -71,6 +85,11 @@ class FacturadorMock:
             cae_vencimiento=solicitud.fecha + timedelta(days=10),
             observaciones=["Comprobante simulado (ARCA_MODE=mock): no tiene validez fiscal."],
         )
+
+    def consultar(
+        self, punto_venta: int, tipo_comprobante: int, numero: int
+    ) -> ResultadoEmision | None:
+        return None
 
 
 def construir_detalle(
@@ -138,18 +157,22 @@ class FacturadorArca:
     def emitir(self, solicitud: SolicitudFactura) -> ResultadoEmision:
         proximo = self.ultimo_autorizado(solicitud.punto_venta, solicitud.tipo_comprobante) + 1
         detalle = construir_detalle(solicitud, proximo, date.today())
-
-        respuesta = self._cliente.service.FECAESolicitar(
-            Auth=self._auth(),
-            FeCAEReq={
-                "FeCabReq": {
-                    "CantReg": 1,
-                    "PtoVta": solicitud.punto_venta,
-                    "CbteTipo": solicitud.tipo_comprobante,
-                },
-                "FeDetReq": {"FECAEDetRequest": [detalle]},
+        # Se resuelve la autenticación ANTES del envío: si falla el WSAA no se envió nada
+        # a ARCA (reintento seguro). Lo que puede quedar en resultado desconocido es solo
+        # el FECAESolicitar.
+        auth = self._auth()
+        req = {
+            "FeCabReq": {
+                "CantReg": 1,
+                "PtoVta": solicitud.punto_venta,
+                "CbteTipo": solicitud.tipo_comprobante,
             },
-        )
+            "FeDetReq": {"FECAEDetRequest": [detalle]},
+        }
+        try:
+            respuesta = self._cliente.service.FECAESolicitar(Auth=auth, FeCAEReq=req)
+        except Exception as exc:  # noqa: BLE001 - timeout/red: resultado DESCONOCIDO
+            raise ResultadoDesconocido(proximo) from exc
         _verificar_errores(respuesta)
         det = respuesta.FeDetResp.FECAEDetResponse[0]
         vto = str(det.CAEFchVto)
@@ -160,6 +183,40 @@ class FacturadorArca:
             cae=str(det.CAE),
             cae_vencimiento=date(int(vto[0:4]), int(vto[4:6]), int(vto[6:8])),
             observaciones=_observaciones(det),
+        )
+
+    def consultar(
+        self, punto_venta: int, tipo_comprobante: int, numero: int
+    ) -> ResultadoEmision | None:
+        """Consulta un comprobante en ARCA (FECompConsultar). Devuelve el CAE si existe,
+        o None si no fue emitido. Se usa para reconciliar tras un resultado desconocido."""
+        try:
+            respuesta = self._cliente.service.FECompConsultar(
+                Auth=self._auth(),
+                FeCompConsReq={
+                    "CbteTipo": tipo_comprobante,
+                    "CbteNro": numero,
+                    "PtoVta": punto_venta,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - fallas SOAP heterogéneas
+            raise ErrorArca(f"Error consultando comprobante en ARCA: {exc}") from exc
+        if getattr(respuesta, "Errors", None) is not None:
+            return None  # no existe (típicamente error 602)
+        r = getattr(respuesta, "ResultGet", None)
+        cae = getattr(r, "CodAutorizacion", None) if r is not None else None
+        if not cae:
+            return None
+        vto = str(getattr(r, "FchVto", "") or "")
+        try:
+            vencimiento = date(int(vto[0:4]), int(vto[4:6]), int(vto[6:8]))
+        except (ValueError, IndexError):
+            vencimiento = date.today()
+        return ResultadoEmision(
+            numero=int(getattr(r, "CbteDesde", numero)),
+            cae=str(cae),
+            cae_vencimiento=vencimiento,
+            observaciones=[],
         )
 
 
