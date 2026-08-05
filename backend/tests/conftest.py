@@ -4,6 +4,8 @@ from collections.abc import Iterator
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 os.environ.setdefault("ARCA_MODE", "mock")
 os.environ.setdefault("ARCA_CUIT", "20111111112")
+os.environ.setdefault("FACTURADOR_ADMIN_TOKEN", "admin-test")
+os.environ.setdefault("FACTURADOR_SECRET", "secreto-de-test")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

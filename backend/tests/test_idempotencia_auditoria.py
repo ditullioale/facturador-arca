@@ -43,14 +43,14 @@ def test_timeout_no_duplica_reconcilia_con_consultar(client, monkeypatch):
     tid = _transferencia_con_cuit(client)
 
     # 1) Primer intento: timeout -> queda "revisar" con numero_intentado, sin CAE.
-    monkeypatch.setattr(fact, "get_facturador", lambda: _FacturadorDesconocido())
+    monkeypatch.setattr(fact, "get_facturador_para", lambda emisor: _FacturadorDesconocido())
     r1 = client.post(f"/api/transferencias/{tid}/facturar").json()
     assert r1["estado"] == "revisar"
     assert r1["numero_intentado"] == 4242
     assert r1["cae"] is None
 
     # 2) Reintento: ARCA dice que el 4242 SÍ se había autorizado -> adopta el CAE, no re-emite.
-    monkeypatch.setattr(fact, "get_facturador", lambda: _FacturadorReconcilia())
+    monkeypatch.setattr(fact, "get_facturador_para", lambda emisor: _FacturadorReconcilia())
     r2 = client.post(f"/api/transferencias/{tid}/facturar").json()
     assert r2["estado"] == "emitida"
     assert r2["cae"] == "CAE-RECONCILIADO"
@@ -59,7 +59,7 @@ def test_timeout_no_duplica_reconcilia_con_consultar(client, monkeypatch):
 
 def test_reconciliacion_negativa_permite_reintentar(client, monkeypatch):
     tid = _transferencia_con_cuit(client)
-    monkeypatch.setattr(fact, "get_facturador", lambda: _FacturadorDesconocido())
+    monkeypatch.setattr(fact, "get_facturador_para", lambda emisor: _FacturadorDesconocido())
     assert client.post(f"/api/transferencias/{tid}/facturar").json()["estado"] == "revisar"
 
     # consultar dice que NO existe -> es seguro reintentar y ahora emite bien (mock real).
@@ -69,7 +69,7 @@ def test_reconciliacion_negativa_permite_reintentar(client, monkeypatch):
         def consultar(self, pv, tipo, nro):
             return None
 
-    monkeypatch.setattr(fact, "get_facturador", lambda: _NoExisteLuegoEmite())
+    monkeypatch.setattr(fact, "get_facturador_para", lambda emisor: _NoExisteLuegoEmite())
     r = client.post(f"/api/transferencias/{tid}/facturar").json()
     assert r["estado"] == "emitida"
     assert r["cae"]

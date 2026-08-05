@@ -2,6 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     LargeBinary,
@@ -22,6 +23,7 @@ class Lote(Base):
     __tablename__ = "lotes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    emisor_id: Mapped[int | None] = mapped_column(ForeignKey("emisores.id"), index=True)
     nombre_archivo: Mapped[str] = mapped_column(String(255))
     banco: Mapped[str] = mapped_column(String(32))
     cantidad_filas: Mapped[int] = mapped_column(default=0)
@@ -42,6 +44,7 @@ class Transferencia(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     lote_id: Mapped[int] = mapped_column(ForeignKey("lotes.id"))
+    emisor_id: Mapped[int | None] = mapped_column(ForeignKey("emisores.id"), index=True)
     banco: Mapped[str] = mapped_column(String(32))
     fecha: Mapped[date]
     cuit: Mapped[str | None] = mapped_column(String(11), index=True)
@@ -74,6 +77,7 @@ class Factura(Base):
     transferencia_id: Mapped[int | None] = mapped_column(
         ForeignKey("transferencias.id"), nullable=True
     )
+    emisor_id: Mapped[int | None] = mapped_column(ForeignKey("emisores.id"), index=True)
     # "resumen_bancario" | "gestor_alquileres"
     origen: Mapped[str] = mapped_column(String(32), default="resumen_bancario")
     # CUIT del emisor (para integraciones multiempresa: cada inmobiliaria factura con el suyo).
@@ -108,6 +112,7 @@ class AuditoriaArca(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     factura_id: Mapped[int | None] = mapped_column(ForeignKey("facturas.id"))
+    emisor_id: Mapped[int | None] = mapped_column(ForeignKey("emisores.id"), index=True)
     operacion: Mapped[str] = mapped_column(String(32))  # emitir | reconciliar
     modo: Mapped[str] = mapped_column(String(16))       # mock | homologacion | produccion
     emisor_cuit: Mapped[str | None] = mapped_column(String(11))
@@ -120,3 +125,30 @@ class AuditoriaArca(Base):
     cae: Mapped[str | None] = mapped_column(String(32))
     mensaje: Mapped[str | None] = mapped_column(Text)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Emisor(Base):
+    """Una inmobiliaria/CUIT que factura con su propio certificado de ARCA (multiempresa)."""
+
+    __tablename__ = "emisores"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cuit: Mapped[str] = mapped_column(String(11), unique=True, index=True)
+    razon_social: Mapped[str | None] = mapped_column(String(255))
+    punto_venta: Mapped[int] = mapped_column(default=1)
+    tipo_comprobante: Mapped[int] = mapped_column(default=11)
+    arca_mode: Mapped[str] = mapped_column(String(16), default="mock")
+    consultar_padron: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Certificado y clave privada de ARCA, cifrados en reposo (ver services/cripto.py).
+    cert_cifrado: Mapped[str | None] = mapped_column(Text)
+    key_cifrado: Mapped[str | None] = mapped_column(Text)
+    # Hash del token con el que el gestor autentica a este emisor.
+    token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    # Marca el emisor "por defecto" (migrado de las variables de entorno).
+    por_defecto: Mapped[bool] = mapped_column(Boolean, default=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def tiene_certificado(self) -> bool:
+        return bool(self.cert_cifrado and self.key_cifrado)

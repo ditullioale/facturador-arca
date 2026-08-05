@@ -3,8 +3,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Lote, Transferencia
+from app.models import Emisor, Lote, Transferencia
 from app.schemas import LoteOut, ResultadoImportacion, TransferenciaOut
+from app.services.emisores import emisor_actual
 from app.services.resumen_parser import ErrorDeParseo, parsear_resumen
 
 router = APIRouter(prefix="/api/lotes", tags=["lotes"])
@@ -14,7 +15,9 @@ EXTENSIONES = (".xlsx", ".xlsm", ".xls", ".csv", ".pdf")
 
 @router.post("", response_model=ResultadoImportacion, status_code=status.HTTP_201_CREATED)
 async def importar_resumen(
-    archivo: UploadFile = File(...), db: Session = Depends(get_db)
+    archivo: UploadFile = File(...),
+    emisor: Emisor = Depends(emisor_actual),
+    db: Session = Depends(get_db),
 ) -> ResultadoImportacion:
     nombre = archivo.filename or "resumen.xlsx"
     if not nombre.lower().endswith(EXTENSIONES):
@@ -29,6 +32,7 @@ async def importar_resumen(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
 
     lote = Lote(
+        emisor_id=emisor.id,
         nombre_archivo=nombre,
         banco=resultado.banco,
         cantidad_filas=resultado.cantidad_filas,
@@ -42,7 +46,8 @@ async def importar_resumen(
     existentes = set(
         db.scalars(
             select(Transferencia.huella).where(
-                Transferencia.huella.in_([m.huella for m in resultado.movimientos] or [""])
+                Transferencia.emisor_id == emisor.id,
+                Transferencia.huella.in_([m.huella for m in resultado.movimientos] or [""]),
             )
         )
     )
@@ -56,6 +61,7 @@ async def importar_resumen(
         nuevas.append(
             Transferencia(
                 lote_id=lote.id,
+                emisor_id=emisor.id,
                 banco=resultado.banco,
                 fecha=movimiento.fecha,
                 cuit=movimiento.cuit,
@@ -79,11 +85,18 @@ async def importar_resumen(
 
 @router.get("", response_model=list[LoteOut])
 def listar_lotes(
-    limit: int = 50, offset: int = 0, db: Session = Depends(get_db)
+    limit: int = 50,
+    offset: int = 0,
+    emisor: Emisor = Depends(emisor_actual),
+    db: Session = Depends(get_db),
 ) -> list[LoteOut]:
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
     lotes = db.scalars(
-        select(Lote).order_by(Lote.id.desc()).limit(limit).offset(offset)
+        select(Lote)
+        .where(Lote.emisor_id == emisor.id)
+        .order_by(Lote.id.desc())
+        .limit(limit)
+        .offset(offset)
     ).all()
     return [LoteOut.model_validate(lote) for lote in lotes]

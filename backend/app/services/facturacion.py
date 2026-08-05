@@ -1,4 +1,4 @@
-"""Orquesta la emisión de facturas en ARCA.
+"""Orquesta la emisión de facturas en ARCA (multiempresa: cada emisor con su certificado).
 
 Dos orígenes posibles:
 
@@ -19,8 +19,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Factura, Transferencia
-from app.services.arca import get_facturador, get_padron
+from app.models import Emisor, Factura, Transferencia
+from app.services.arca.factory import get_facturador_para, get_padron_para
 from app.services.arca.padron import DatosPadron
 from app.services.arca.wsaa import ErrorArca
 from app.services.arca.wsfe import ResultadoDesconocido, SolicitudFactura
@@ -35,7 +35,7 @@ class RequiereConfirmacionError(ValueError):
 
 
 class EmisorInvalidoError(ValueError):
-    """El CUIT emisor pedido no coincide con las credenciales configuradas."""
+    """El CUIT emisor pedido no coincide con el del token/credenciales."""
 
 
 def supera_minimo(importe: Decimal) -> bool:
@@ -52,10 +52,10 @@ def _validar_minimo(importe: Decimal, confirmar_bajo_minimo: bool) -> None:
         )
 
 
-def consultar_padron(cuit: str) -> tuple[DatosPadron, bool]:
-    """Consulta el padrón y completa el domicilio por defecto si ARCA no lo informa."""
+def consultar_padron(cuit: str, emisor: Emisor) -> tuple[DatosPadron, bool]:
+    """Consulta el padrón (con el certificado del emisor) y completa el domicilio por defecto."""
     settings = get_settings()
-    datos = get_padron().consultar(cuit)
+    datos = get_padron_para(emisor).consultar(cuit)
     autocompletado = not (datos.domicilio or "").strip()
     if autocompletado:
         datos = DatosPadron(
@@ -66,16 +66,30 @@ def consultar_padron(cuit: str) -> tuple[DatosPadron, bool]:
     return datos, autocompletado
 
 
-def _auditar(db: Session, factura: Factura, operacion: str, resultado: str) -> None:
+def _padron_seguro(cuit: str, emisor: Emisor) -> tuple[str | None, str | None]:
+    """Consulta el padrón sin frenar la emisión: si falla (típico en homologación),
+    devuelve datos vacíos con el domicilio por defecto. El domicilio no se envía a
+    ARCA (solo se usa en la representación impresa), así que no es crítico."""
+    settings = get_settings()
+    if not emisor.consultar_padron:
+        return None, settings.domicilio_default
+    try:
+        datos, _ = consultar_padron(cuit, emisor)
+        return datos.razon_social, datos.domicilio
+    except ErrorArca:
+        return None, settings.domicilio_default
+
+
+def _auditar(db: Session, factura: Factura, emisor: Emisor, operacion: str, resultado: str) -> None:
     from app.models import AuditoriaArca
 
-    s = get_settings()
     db.add(
         AuditoriaArca(
             factura_id=factura.id,
+            emisor_id=emisor.id,
             operacion=operacion,
-            modo=s.arca_mode,
-            emisor_cuit=factura.emisor_cuit or (s.arca_cuit or None),
+            modo=emisor.arca_mode,
+            emisor_cuit=emisor.cuit,
             receptor_cuit=factura.cuit_receptor,
             punto_venta=factura.punto_venta,
             tipo_comprobante=factura.tipo_comprobante,
@@ -88,25 +102,27 @@ def _auditar(db: Session, factura: Factura, operacion: str, resultado: str) -> N
     )
 
 
-def _finalizar(db: Session, factura: Factura, operacion: str, resultado: str) -> Factura:
+def _finalizar(
+    db: Session, factura: Factura, emisor: Emisor, operacion: str, resultado: str
+) -> Factura:
     db.add(factura)
     db.flush()  # asegura factura.id para la auditoría
-    _auditar(db, factura, operacion, resultado)
+    _auditar(db, factura, emisor, operacion, resultado)
     db.commit()
     db.refresh(factura)
     return factura
 
 
 def _emitir_en_arca(
-    db: Session, factura: Factura, condicion_iva_receptor: int
+    db: Session, factura: Factura, emisor: Emisor, condicion_iva_receptor: int
 ) -> Factura:
-    """Pide el CAE a ARCA para una `Factura` ya armada y persiste el resultado.
+    """Pide el CAE a ARCA (con el certificado del emisor) y persiste el resultado.
 
     Idempotencia anti-duplicado: si un intento anterior quedó con resultado desconocido
     (timeout), antes de reintentar se consulta a ARCA (FECompConsultar) si ese número ya
     fue autorizado; si lo fue, se adopta el CAE en vez de emitir de nuevo.
     """
-    facturador = get_facturador()
+    facturador = get_facturador_para(emisor)
 
     if factura.numero_intentado:
         try:
@@ -114,9 +130,8 @@ def _emitir_en_arca(
                 factura.punto_venta, factura.tipo_comprobante, factura.numero_intentado
             )
         except ErrorArca:
-            # No se pudo verificar: se mantiene en "revisar" (no se reintenta a ciegas).
             factura.estado = "revisar"
-            return _finalizar(db, factura, "reconciliar", "revisar")
+            return _finalizar(db, factura, emisor, "reconciliar", "revisar")
         if recon is not None:
             factura.numero = recon.numero
             factura.cae = recon.cae
@@ -124,9 +139,8 @@ def _emitir_en_arca(
             factura.estado = "emitida"
             factura.error = None
             factura.numero_intentado = None
-            return _finalizar(db, factura, "reconciliar", "reconciliada")
-        # No existía en ARCA: es seguro reintentar.
-        factura.numero_intentado = None
+            return _finalizar(db, factura, emisor, "reconciliar", "reconciliada")
+        factura.numero_intentado = None  # no existía en ARCA: reintentar es seguro
 
     try:
         resultado = facturador.emitir(
@@ -146,12 +160,12 @@ def _emitir_en_arca(
             "Resultado desconocido (timeout de ARCA): se reconciliará con FECompConsultar "
             "antes de reintentar para no duplicar."
         )
-        return _finalizar(db, factura, "emitir", "revisar")
+        return _finalizar(db, factura, emisor, "emitir", "revisar")
     except (ErrorArca, ValueError) as exc:
         factura.estado = "error"
         factura.error = str(exc)[:1000]
         factura.numero_intentado = None
-        return _finalizar(db, factura, "emitir", "error")
+        return _finalizar(db, factura, emisor, "emitir", "error")
 
     factura.numero = resultado.numero
     factura.cae = resultado.cae
@@ -159,25 +173,14 @@ def _emitir_en_arca(
     factura.estado = "emitida"
     factura.error = None
     factura.numero_intentado = None
-    return _finalizar(db, factura, "emitir", "emitida")
-
-
-def _padron_seguro(cuit: str) -> tuple[str | None, str | None]:
-    """Consulta el padrón sin frenar la emisión: si falla (típico en homologación),
-    devuelve datos vacíos con el domicilio por defecto. El domicilio no se envía a
-    ARCA (solo se usa en la representación impresa), así que no es crítico."""
-    settings = get_settings()
-    if not settings.arca_consultar_padron:
-        return None, settings.domicilio_default
-    try:
-        datos, _ = consultar_padron(cuit)
-        return datos.razon_social, datos.domicilio
-    except ErrorArca:
-        return None, settings.domicilio_default
+    return _finalizar(db, factura, emisor, "emitir", "emitida")
 
 
 def emitir_factura(
-    db: Session, transferencia: Transferencia, confirmar_bajo_minimo: bool = False
+    db: Session,
+    transferencia: Transferencia,
+    emisor: Emisor,
+    confirmar_bajo_minimo: bool = False,
 ) -> Factura:
     """Emite (una sola vez) la factura de una transferencia y persiste el resultado."""
     settings = get_settings()
@@ -191,24 +194,27 @@ def emitir_factura(
 
     factura = transferencia.factura or Factura(
         transferencia_id=transferencia.id,
+        emisor_id=emisor.id,
         origen="resumen_bancario",
-        emisor_cuit=settings.arca_cuit or None,
+        emisor_cuit=emisor.cuit,
         cuit_receptor=transferencia.cuit,
         concepto_descripcion=settings.arca_concepto_descripcion,
-        tipo_comprobante=settings.arca_tipo_comprobante,
-        punto_venta=settings.arca_punto_venta,
+        tipo_comprobante=emisor.tipo_comprobante,
+        punto_venta=emisor.punto_venta,
         importe=transferencia.importe,
         fecha_comprobante=transferencia.fecha,
     )
+    factura.emisor_id = emisor.id
+    factura.emisor_cuit = emisor.cuit
     factura.cuit_receptor = transferencia.cuit
 
-    razon_social, domicilio = _padron_seguro(transferencia.cuit)
+    razon_social, domicilio = _padron_seguro(transferencia.cuit, emisor)
     factura.razon_social = razon_social
     factura.domicilio = domicilio
     transferencia.razon_social = razon_social
     transferencia.domicilio = domicilio
 
-    factura = _emitir_en_arca(db, factura, settings.arca_cond_iva_receptor)
+    factura = _emitir_en_arca(db, factura, emisor, settings.arca_cond_iva_receptor)
     if factura.estado == "emitida":
         transferencia.estado = "facturada"
         db.add(transferencia)
@@ -219,6 +225,7 @@ def emitir_factura(
 
 def emitir_factura_directa(
     db: Session,
+    emisor: Emisor,
     *,
     receptor_cuit: str,
     importe: Decimal,
@@ -235,50 +242,46 @@ def emitir_factura_directa(
     """Emite una factura a partir de datos explícitos (integración con el gestor).
 
     Idempotente por `referencia_externa`: si ya existe una factura emitida con esa
-    referencia se devuelve la misma, sin volver a pedir CAE.
+    referencia (del mismo emisor) se devuelve la misma, sin volver a pedir CAE.
     """
     settings = get_settings()
 
     existente = db.scalar(
-        select(Factura).where(Factura.referencia_externa == referencia_externa)
+        select(Factura).where(
+            Factura.referencia_externa == referencia_externa,
+            Factura.emisor_id == emisor.id,
+        )
     )
     if existente is not None and existente.estado == "emitida":
         return existente
 
-    _validar_emisor(emisor_cuit)
+    if emisor_cuit and emisor_cuit != emisor.cuit:
+        raise EmisorInvalidoError(
+            f"El emisor {emisor_cuit} no coincide con el del token ({emisor.cuit})."
+        )
     _validar_minimo(importe, confirmar_bajo_minimo)
 
     if not razon_social or not domicilio:
-        p_razon, p_dom = _padron_seguro(receptor_cuit)
+        p_razon, p_dom = _padron_seguro(receptor_cuit, emisor)
         razon_social = razon_social or p_razon
         domicilio = domicilio or p_dom
 
     factura = existente or Factura(
         transferencia_id=None,
+        emisor_id=emisor.id,
         origen=origen,
         referencia_externa=referencia_externa,
     )
-    factura.emisor_cuit = emisor_cuit or settings.arca_cuit or None
+    factura.emisor_id = emisor.id
+    factura.emisor_cuit = emisor.cuit
     factura.cuit_receptor = receptor_cuit
     factura.razon_social = razon_social
     factura.domicilio = domicilio
     factura.concepto_descripcion = concepto_descripcion or settings.arca_concepto_descripcion
-    factura.tipo_comprobante = settings.arca_tipo_comprobante
-    factura.punto_venta = settings.arca_punto_venta
+    factura.tipo_comprobante = emisor.tipo_comprobante
+    factura.punto_venta = emisor.punto_venta
     factura.importe = Decimal(importe)
     factura.fecha_comprobante = fecha
 
     condicion = condicion_iva_receptor or settings.arca_cond_iva_receptor
-    return _emitir_en_arca(db, factura, condicion)
-
-
-def _validar_emisor(emisor_cuit: str | None) -> None:
-    """En modo real el emisor pedido debe coincidir con las credenciales cargadas."""
-    settings = get_settings()
-    if settings.arca_mode == "mock" or not emisor_cuit:
-        return
-    if settings.arca_cuit and emisor_cuit != settings.arca_cuit:
-        raise EmisorInvalidoError(
-            f"El emisor {emisor_cuit} no coincide con el CUIT configurado "
-            f"({settings.arca_cuit}). Esta instancia factura para un único emisor."
-        )
+    return _emitir_en_arca(db, factura, emisor, condicion)

@@ -176,3 +176,39 @@ class AuditoriaOut(BaseModel):
     cae: str | None
     mensaje: str | None
     creado_en: datetime | None
+
+
+class EmisorAltaIn(BaseModel):
+    """Alta/edición de un emisor (lo manda el gestor con el token de admin)."""
+
+    cuit: str
+    razon_social: str | None = None
+    punto_venta: int = 1
+    tipo_comprobante: int = 11
+    arca_mode: str = "homologacion"
+    consultar_padron: bool = True
+    cert_b64: str | None = None  # certificado ARCA en base64
+    key_b64: str | None = None   # clave privada en base64
+
+
+class EmisorOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    cuit: str
+    razon_social: str | None
+    punto_venta: int
+    tipo_comprobante: int
+    arca_mode: str
+    consultar_padron: bool
+    por_defecto: bool
+    activo: bool
+    tiene_certificado: bool
+    creado_en: datetime | None
+
+
+class EmisorTokenOut(BaseModel):
+    """Respuesta del alta: incluye el token en texto plano (se muestra una sola vez)."""
+
+    emisor: EmisorOut
+    token: str

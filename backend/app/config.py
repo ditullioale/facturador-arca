@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     # Vacío = carpeta temporal del sistema.
     arca_ta_dir: str = ""
 
+    # Multiempresa: clave maestra para cifrar los certificados de cada emisor,
+    # y token para el endpoint de alta de emisores (lo usa el gestor).
+    facturador_secret: str = ""
+    facturador_admin_token: str = ""
+
     # Domicilio por defecto cuando el padrón de ARCA no informa uno.
     domicilio_default: str = "Arroyo Seco"
 

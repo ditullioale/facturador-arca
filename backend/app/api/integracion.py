@@ -9,8 +9,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.models import Emisor
 from app.schemas import FacturaLiquidacionIn, FacturaOut, ResultadoFacturacion
 from app.services.arca.wsaa import ErrorArca
+from app.services.emisores import emisor_actual
 from app.services.facturacion import (
     EmisorInvalidoError,
     RequiereConfirmacionError,
@@ -22,11 +24,14 @@ router = APIRouter(prefix="/api/integracion", tags=["integracion"])
 
 @router.post("/liquidacion", response_model=ResultadoFacturacion)
 def facturar_liquidacion(
-    datos: FacturaLiquidacionIn, db: Session = Depends(get_db)
+    datos: FacturaLiquidacionIn,
+    emisor: Emisor = Depends(emisor_actual),
+    db: Session = Depends(get_db),
 ) -> ResultadoFacturacion:
     try:
         factura = emitir_factura_directa(
             db,
+            emisor,
             receptor_cuit=datos.receptor_cuit,
             importe=datos.importe,
             fecha=datos.fecha,
