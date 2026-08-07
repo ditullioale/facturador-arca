@@ -5,11 +5,12 @@ emitir la factura de honorarios (comisión de la inmobiliaria) al propietario.
 La operación es idempotente por `referencia_externa`.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Emisor
+from app.models import Emisor, Factura
 from app.schemas import FacturaLiquidacionIn, FacturaOut, ResultadoFacturacion
 from app.services.arca.wsaa import ErrorArca
 from app.services.emisores import emisor_actual
@@ -49,6 +50,34 @@ def facturar_liquidacion(
     except (EmisorInvalidoError, ErrorArca, ValueError) as exc:
         return ResultadoFacturacion(estado="error", mensaje=str(exc))
 
+    return ResultadoFacturacion(
+        estado=factura.estado,
+        mensaje=factura.error,
+        factura=FacturaOut.model_validate(factura),
+    )
+
+
+@router.get("/liquidacion", response_model=ResultadoFacturacion)
+def consultar_liquidacion(
+    referencia_externa: str,
+    emisor: Emisor = Depends(emisor_actual),
+    db: Session = Depends(get_db),
+) -> ResultadoFacturacion:
+    """Reconciliación (Fase 6.3): devuelve el comprobante de esa referencia externa
+    (del emisor del token), sin tener que traer todo el listado de facturas. Útil para
+    resolver liquidaciones que en el gestor quedaron pendientes por un timeout pero que
+    en realidad ya se emitieron. 404 si no existe ninguna para esa referencia."""
+    factura = db.scalar(
+        select(Factura).where(
+            Factura.referencia_externa == referencia_externa,
+            Factura.emisor_id == emisor.id,
+        )
+    )
+    if factura is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "No hay ningún comprobante para esa referencia externa.",
+        )
     return ResultadoFacturacion(
         estado=factura.estado,
         mensaje=factura.error,

@@ -148,3 +148,27 @@ def test_integracion_bajo_minimo_pregunta(client):
 def test_integracion_cuit_invalido_422(client):
     r = client.post("/api/integracion/liquidacion", json=_liquidacion(receptor_cuit="123"))
     assert r.status_code == 422
+
+
+def test_reconciliacion_consulta_por_referencia(client):
+    emitida = client.post(
+        "/api/integracion/liquidacion",
+        json=_liquidacion(referencia_externa="gestor:1:LIQ-REC"),
+    ).json()
+    assert emitida["estado"] == "emitida"
+
+    consulta = client.get(
+        "/api/integracion/liquidacion", params={"referencia_externa": "gestor:1:LIQ-REC"}
+    )
+    assert consulta.status_code == 200
+    datos = consulta.json()
+    assert datos["estado"] == "emitida"
+    assert datos["factura"]["id"] == emitida["factura"]["id"]
+    assert datos["factura"]["cae"] == emitida["factura"]["cae"]
+
+
+def test_reconciliacion_referencia_inexistente_404(client):
+    r = client.get(
+        "/api/integracion/liquidacion", params={"referencia_externa": "gestor:1:NO-EXISTE"}
+    )
+    assert r.status_code == 404
