@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import zeep
-from zeep.transports import Transport
 
+from app.services.arca.transporte import transporte_arca
 from app.services.arca.wsaa import ClienteWsaa, ErrorArca
 
 URLS_PADRON = {
@@ -47,7 +47,7 @@ class PadronArca:
         ticket = self._wsaa.ticket(SERVICIO)
         try:
             persona = zeep.Client(
-                self._url, transport=Transport(timeout=15, operation_timeout=15)
+                self._url, transport=transporte_arca()
             ).service.getPersona(
                 token=ticket.token,
                 sign=ticket.sign,
