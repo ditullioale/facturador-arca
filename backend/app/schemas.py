@@ -212,3 +212,30 @@ class EmisorTokenOut(BaseModel):
 
     emisor: EmisorOut
     token: str
+
+
+class DiagnosticoEmisor(BaseModel):
+    """Estado operativo de un emisor: lo que hace falta para saber si va a poder facturar."""
+
+    cuit: str
+    razon_social: str | None
+    arca_mode: str
+    activo: bool
+    tiene_certificado: bool
+    tiene_token: bool
+    # None cuando el certificado no se pudo leer (falta, o está cifrado con otra clave).
+    certificado_vence: date | None
+    dias_para_vencer: int | None
+    certificado_vencido: bool
+    facturas_a_reconciliar: int
+
+
+class DiagnosticoOut(BaseModel):
+    """Diagnóstico del servicio. Pide token de admin: dice cómo está configurado."""
+
+    arca_mode: str
+    docs_publicas: bool
+    autenticacion_obligatoria: bool
+    secreto_de_cifrado_configurado: bool
+    emisores: list[DiagnosticoEmisor]
+    advertencias: list[str]

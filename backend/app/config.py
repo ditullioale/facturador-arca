@@ -59,8 +59,52 @@ class Settings(BaseSettings):
     # tener el MISMO valor en el gestor (FACTURADOR_INTEGRACION_TOKEN). Vacío = sin verificación.
     facturador_integracion_token: str = ""
 
+    # Documentación interactiva (/docs, /redoc, /openapi.json). Apagada por defecto:
+    # el facturador es un servicio server-to-server y publicar el catálogo de endpoints
+    # sólo le sirve a quien lo quiera sondear. Encender con FACTURADOR_DOCS=1 en desarrollo.
+    facturador_docs: bool = False
+    # Tamaño máximo del resumen bancario que se acepta subir (MB). El archivo se lee
+    # entero en memoria para parsearlo y para guardarlo, así que sin tope un archivo
+    # grande tumba el proceso.
+    facturador_max_upload_mb: int = 10
+
     # Domicilio por defecto cuando el padrón de ARCA no informa uno.
     domicilio_default: str = "Arroyo Seco"
+
+    @property
+    def modo_real(self) -> bool:
+        """True si el emisor por defecto opera contra ARCA de verdad (no mock)."""
+        return self.arca_mode in ("homologacion", "produccion")
+
+    @property
+    def secreto_de_cifrado_configurado(self) -> bool:
+        return bool(self.facturador_secret.strip())
+
+    def errores_de_configuracion(self) -> list[str]:
+        """Problemas de configuración que hacen inseguro operar contra ARCA real.
+
+        Se chequean al arrancar (ver ``app.main``) para fallar fuerte y temprano en vez
+        de descubrirlos cuando ya se emitió algo o cuando alguien encontró la URL.
+        """
+        if not self.modo_real:
+            return []
+        problemas = []
+        if not self.secreto_de_cifrado_configurado:
+            problemas.append(
+                "Falta FACTURADOR_SECRET: sin él los certificados de ARCA se cifran con "
+                "una clave que está escrita en el código fuente."
+            )
+        if not self.facturador_integracion_token.strip():
+            problemas.append(
+                "Falta FACTURADOR_INTEGRACION_TOKEN: sin él, cualquiera que conozca la URL "
+                "puede emitir comprobantes con el emisor por defecto."
+            )
+        if "*" in self.cors_origin_list:
+            problemas.append(
+                "CORS_ORIGINS no puede ser '*' con credenciales habilitadas: indicá los "
+                "orígenes exactos del frontend."
+            )
+        return problemas
 
     @property
     def cert_path_efectivo(self) -> str:
