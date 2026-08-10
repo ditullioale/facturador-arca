@@ -48,10 +48,31 @@ def emisor_por_defecto(db: Session) -> Emisor | None:
 
     Si hay ARCA_CUIT configurado y aún no existe, lo crea con las credenciales del entorno
     y adopta los datos previos (los que tienen emisor_id NULL)."""
+    s = get_settings()
     existente = db.scalar(select(Emisor).where(Emisor.por_defecto.is_(True)))
     if existente is not None:
+        # El emisor por defecto refleja SIEMPRE las variables de entorno. Se crea una
+        # sola vez, pero su configuración (modo, punto de venta, tipo, padrón) tiene que
+        # seguir los cambios del deploy. Si no se sincroniza, pasar de homologación a
+        # producción cambiando ARCA_MODE no tendría efecto: el registro viejo quedaría
+        # en 'homologacion' y WSAA rechazaría el certificado de producción
+        # ("Certificado no emitido por AC de confianza").
+        objetivos = {
+            "arca_mode": s.arca_mode,
+            "punto_venta": s.arca_punto_venta,
+            "tipo_comprobante": s.arca_tipo_comprobante,
+            "consultar_padron": s.arca_consultar_padron,
+        }
+        cambios = [a for a, v in objetivos.items() if getattr(existente, a) != v]
+        if cambios:
+            for attr in cambios:
+                setattr(existente, attr, objetivos[attr])
+            db.commit()
+            db.refresh(existente)
+            from app.services.arca.factory import invalidar_emisor
+
+            invalidar_emisor(existente.id)
         return existente
-    s = get_settings()
     cuit = (s.arca_cuit or "").strip()
     if not cuit:
         return None
