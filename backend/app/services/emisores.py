@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import base64
+import secrets
 import tempfile
+from datetime import date
 from pathlib import Path
 
+from cryptography.fernet import InvalidToken
+from cryptography.x509 import load_pem_x509_certificate
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -41,6 +45,22 @@ def credenciales_pem(emisor: Emisor) -> tuple[str, str]:
     return str(cert_p), str(key_p)
 
 
+
+
+def vencimiento_certificado(emisor: Emisor) -> date | None:
+    """Fecha hasta la que vale el certificado de ARCA del emisor, o None si no se pudo leer.
+
+    Los certificados de ARCA duran un año: cuando vencen, WSAA rechaza la autenticación y
+    la facturación se corta de golpe, sin que nada lo haya anunciado. Tenerlo a la vista
+    (ver el diagnóstico de emisores) es lo que permite renovarlo antes y no después.
+    """
+    try:
+        cert_path, _ = credenciales_pem(emisor)
+        pem = Path(cert_path).read_bytes()
+        certificado = load_pem_x509_certificate(pem)
+    except (ErrorArca, OSError, ValueError, InvalidToken):
+        return None
+    return certificado.not_valid_after_utc.date()
 
 
 def emisor_por_defecto(db: Session) -> Emisor | None:
@@ -106,8 +126,9 @@ def emisor_actual(
     """Resuelve el emisor de la request: por token Bearer, o el emisor por defecto.
 
     El emisor por defecto (sin token propio) queda protegido por un secreto compartido:
-    si se configuró FACTURADOR_INTEGRACION_TOKEN, el pedido debe traer el header
-    X-Integracion-Token con ese valor. Si no se configuró, el comportamiento no cambia."""
+    el pedido debe traer el header X-Integracion-Token con el valor de
+    FACTURADOR_INTEGRACION_TOKEN. Si el secreto no está configurado, se permite el acceso
+    anónimo sólo en modo mock (desarrollo); contra ARCA real se rechaza."""
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
         emisor = db.scalar(
@@ -115,13 +136,26 @@ def emisor_actual(
                 Emisor.token_hash == cripto.hash_token(token), Emisor.activo.is_(True)
             )
         )
+        # El token se compara por hash en la base (índice único), así que la búsqueda
+        # ya es de tiempo constante respecto del valor enviado.
         if emisor is None:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token de emisor inválido.")
         return emisor
-    # Sin token de emisor: se usa el emisor por defecto, pero protegido por el secreto
-    # compartido (si está configurado) para que el endpoint no quede abierto.
-    secreto = get_settings().facturador_integracion_token
-    if secreto and (x_integracion_token or "") != secreto:
+    # Sin token de emisor se cae al emisor por defecto, protegido por el secreto
+    # compartido. Si el emisor por defecto opera contra ARCA de verdad, el secreto es
+    # OBLIGATORIO: no configurarlo dejaría la emisión abierta a cualquiera que conozca
+    # la URL, así que se rechaza el pedido en vez de atenderlo (fallar cerrado).
+    ajustes = get_settings()
+    secreto = ajustes.facturador_integracion_token.strip()
+    if not secreto:
+        if ajustes.modo_real:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "El facturador está operando contra ARCA sin token de integración "
+                "configurado: configurá FACTURADOR_INTEGRACION_TOKEN (mismo valor en el "
+                "gestor) o autenticá con el token del emisor.",
+            )
+    elif not secrets.compare_digest(x_integracion_token or "", secreto):
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             "Falta o no coincide el token de integración (X-Integracion-Token).",

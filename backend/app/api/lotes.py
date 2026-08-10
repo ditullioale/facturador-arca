@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db import get_db
 from app.models import Emisor, Lote, Transferencia
 from app.schemas import LoteOut, ResultadoImportacion, TransferenciaOut
@@ -25,7 +26,13 @@ async def importar_resumen(
             status.HTTP_400_BAD_REQUEST,
             f"Formato no soportado. Se aceptan: {', '.join(EXTENSIONES)}",
         )
-    contenido = await archivo.read()
+    tope = get_settings().facturador_max_upload_mb * 1024 * 1024
+    contenido = await archivo.read(tope + 1)
+    if len(contenido) > tope:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"El archivo supera el máximo de {get_settings().facturador_max_upload_mb} MB.",
+        )
     try:
         resultado = parsear_resumen(contenido, nombre)
     except ErrorDeParseo as exc:

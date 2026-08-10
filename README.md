@@ -34,7 +34,8 @@ cp .env.example .env          # completar CUIT, punto de venta y credenciales
 .venv/bin/uvicorn app.main:app --reload
 ```
 
-Documentación interactiva: http://localhost:8000/docs
+Documentación interactiva: http://localhost:8000/docs, con `FACTURADOR_DOCS=1` (apagada por
+defecto: en producción el catálogo de endpoints sólo le sirve a quien quiera sondear el servicio).
 
 ### Frontend
 
@@ -62,6 +63,30 @@ cd frontend && npm run typecheck && npm run build
 `ARCA_TIPO_COMPROBANTE` define el comprobante a emitir: `11` Factura C (monotributo),
 `6` Factura B, `1` Factura A.
 
+## Seguridad y puesta en producción
+
+El facturador es un servicio **server-to-server**: emite comprobantes fiscales con el
+certificado de una inmobiliaria, así que nadie debería poder llamarlo sin credencial.
+
+| Variable | Para qué |
+|---|---|
+| `FACTURADOR_SECRET` | Clave maestra con la que se cifran los certificados de cada emisor. |
+| `FACTURADOR_INTEGRACION_TOKEN` | Secreto compartido con el gestor (header `X-Integracion-Token`) para los pedidos que usan el emisor por defecto. Mismo valor en los dos servicios. |
+| `FACTURADOR_ADMIN_TOKEN` | Alta de emisores y diagnóstico (header `X-Admin-Token`). |
+| `FACTURADOR_DOCS` | `1` para publicar `/docs`, `/redoc` y `/openapi.json`. |
+| `FACTURADOR_MAX_UPLOAD_MB` | Tope del resumen bancario que se acepta subir (10 por defecto). |
+
+Con `ARCA_MODE=homologacion` o `produccion` la configuración se valida **al arrancar** y el
+proceso no levanta si falta `FACTURADOR_SECRET` o `FACTURADOR_INTEGRACION_TOKEN`, o si
+`CORS_ORIGINS` es `*`: operar contra ARCA con la frontera abierta o con los certificados cifrados
+con la clave de desarrollo (que está en el código) no es un aviso, es un motivo para no arrancar.
+En `mock` no se exige nada, así que el desarrollo y las demos no cambian.
+
+`GET /api/emisores/diagnostico` (con `X-Admin-Token`) responde las dos preguntas que hoy sólo se
+contestan cuando algo ya falló: **cuándo vence cada certificado de ARCA** —duran un año y al
+vencer cortan la facturación de golpe— y **cuántos comprobantes quedaron sin reconciliar**.
+Conviene mirarlo desde el monitor de uptime.
+
 ## Flujo
 
 1. `POST /api/lotes` — subida del Excel/CSV/PDF; devuelve las transferencias nuevas, duplicadas y las
@@ -73,6 +98,10 @@ cd frontend && npm run typecheck && npm run build
    se envíe `confirmar_bajo_minimo=true` (o `?confirmar=true` en el endpoint individual).
 4. `GET /api/facturas` — comprobantes emitidos con CAE y vencimiento.
 5. `GET /api/facturas/{id}/pdf` — representación impresa del comprobante con el QR de AFIP.
+6. `POST /api/facturas/reconciliar` — retoma las facturas que quedaron en `revisar` porque ARCA
+   no contestó a tiempo: el comprobante puede estar autorizado allá y no registrado acá. Consulta
+   con `FECompConsultar` antes de reemitir, así que llamarlo de más nunca duplica. Pensado para un
+   cron (el gestor ya lo llama en su reconciliación).
 
 ## Integración con el gestor de alquileres (finart-alquileres)
 
@@ -104,8 +133,7 @@ gestor pregunte al usuario.
 
 - WSFEv1 autoriza importes, no renglones: el texto del concepto se guarda en la factura y se usa
   en la representación impresa en PDF (con QR de AFIP, RG 4291).
-- Emisor único por instancia: cada inmobiliaria factura con su propio CUIT y certificado, por lo
-  que la integración multiempresa usa una instancia (o credenciales) por emisor.
+- No hay notas de crédito: un comprobante emitido por error se corrige en el portal de ARCA.
 - Los formatos de exportación de los bancos cambian; el parser detecta encabezados por nombre de
   columna. Ante un resumen que no reconozca, agregar las palabras clave en
   `app/services/resumen_parser.py`.
