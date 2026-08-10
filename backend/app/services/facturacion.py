@@ -76,7 +76,9 @@ def _padron_seguro(cuit: str, emisor: Emisor) -> tuple[str | None, str | None]:
     try:
         datos, _ = consultar_padron(cuit, emisor)
         return datos.razon_social, datos.domicilio
-    except ErrorArca:
+    except Exception:  # noqa: BLE001 - el padrón NUNCA debe frenar la emisión
+        # Típico en producción si no se autorizó el web service de padrón (solo wsfe),
+        # o en homologación donde suele estar caído. El domicilio no se envía a ARCA.
         return None, settings.domicilio_default
 
 

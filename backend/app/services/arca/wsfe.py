@@ -137,9 +137,14 @@ class FacturadorArca:
     def __init__(self, modo: str, cuit_emisor: str, wsaa: ClienteWsaa) -> None:
         if modo not in URLS_WSFE:
             raise ErrorArca(f"Modo de ARCA inválido para WSFE: {modo}")
-        self._cliente = zeep.Client(
-            URLS_WSFE[modo], transport=Transport(timeout=15, operation_timeout=15)
-        )
+        try:
+            self._cliente = zeep.Client(
+                URLS_WSFE[modo], transport=Transport(timeout=15, operation_timeout=15)
+            )
+        except Exception as exc:  # noqa: BLE001 - no se pudo bajar el WSDL / conectar
+            raise ErrorArca(
+                f"No se pudo conectar al servicio de facturación de ARCA ({modo}): {exc}"
+            ) from exc
         self._cuit_emisor = int(cuit_emisor)
         self._wsaa = wsaa
 
@@ -148,11 +153,26 @@ class FacturadorArca:
         return {"Token": ticket.token, "Sign": ticket.sign, "Cuit": self._cuit_emisor}
 
     def ultimo_autorizado(self, punto_venta: int, tipo_comprobante: int) -> int:
-        respuesta = self._cliente.service.FECompUltimoAutorizado(
-            Auth=self._auth(), PtoVta=punto_venta, CbteTipo=tipo_comprobante
-        )
+        try:
+            respuesta = self._cliente.service.FECompUltimoAutorizado(
+                Auth=self._auth(), PtoVta=punto_venta, CbteTipo=tipo_comprobante
+            )
+        except ErrorArca:
+            raise  # WSAA u otro error ya tipado
+        except Exception as exc:  # noqa: BLE001 - falla SOAP/red al consultar el último número
+            raise ErrorArca(
+                "No se pudo consultar el último comprobante autorizado en ARCA "
+                f"(revisá que el punto de venta {punto_venta} sea de tipo Web Services y esté "
+                f"autorizado para el web service de facturación): {exc}"
+            ) from exc
         _verificar_errores(respuesta)
-        return int(respuesta.CbteNro)
+        numero = getattr(respuesta, "CbteNro", None)
+        if numero is None:
+            raise ErrorArca(
+                "ARCA no devolvió el último número autorizado. Suele ser el punto de venta: "
+                "verificá que exista como 'Factura Electrónica - Web Services' y esté habilitado."
+            )
+        return int(numero)
 
     def emitir(self, solicitud: SolicitudFactura) -> ResultadoEmision:
         proximo = self.ultimo_autorizado(solicitud.punto_venta, solicitud.tipo_comprobante) + 1

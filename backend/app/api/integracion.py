@@ -49,6 +49,15 @@ def facturar_liquidacion(
         return ResultadoFacturacion(estado="requiere_confirmacion", mensaje=str(exc))
     except (EmisorInvalidoError, ErrorArca, ValueError) as exc:
         return ResultadoFacturacion(estado="error", mensaje=str(exc))
+    except Exception as exc:  # noqa: BLE001 - red de seguridad: nunca devolver un 500 opaco
+        import logging
+
+        logging.getLogger("facturador.integracion").error(
+            "Error inesperado emitiendo la factura de liquidación", exc_info=True
+        )
+        return ResultadoFacturacion(
+            estado="error", mensaje=f"Error inesperado del facturador: {exc}"
+        )
 
     return ResultadoFacturacion(
         estado=factura.estado,
