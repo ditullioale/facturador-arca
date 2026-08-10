@@ -15,7 +15,8 @@ import zeep
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.serialization import pkcs7
 from cryptography.x509 import load_pem_x509_certificate
-from zeep.transports import Transport
+
+from app.services.arca.transporte import transporte_arca
 
 URLS_WSAA = {
     "homologacion": "https://wsaahomo.afip.gov.ar/ws/services/LoginCms?wsdl",
@@ -130,7 +131,7 @@ class ClienteWsaa:
         cms = _firmar_cms(_tra(servicio), self._cert_path, self._key_path)
         try:
             respuesta = zeep.Client(
-                self._url, transport=Transport(timeout=15, operation_timeout=15)
+                self._url, transport=transporte_arca()
             ).service.loginCms(in0=cms)
         except Exception as exc:  # noqa: BLE001 - el WSAA devuelve fallas SOAP heterogéneas
             raise ErrorArca(f"Error autenticando en WSAA: {exc}") from exc

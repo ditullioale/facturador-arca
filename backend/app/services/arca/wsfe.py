@@ -14,8 +14,8 @@ from decimal import Decimal
 from typing import Protocol
 
 import zeep
-from zeep.transports import Transport
 
+from app.services.arca.transporte import transporte_arca
 from app.services.arca.wsaa import ClienteWsaa, ErrorArca
 
 URLS_WSFE = {
@@ -138,9 +138,7 @@ class FacturadorArca:
         if modo not in URLS_WSFE:
             raise ErrorArca(f"Modo de ARCA inválido para WSFE: {modo}")
         try:
-            self._cliente = zeep.Client(
-                URLS_WSFE[modo], transport=Transport(timeout=15, operation_timeout=15)
-            )
+            self._cliente = zeep.Client(URLS_WSFE[modo], transport=transporte_arca())
         except Exception as exc:  # noqa: BLE001 - no se pudo bajar el WSDL / conectar
             raise ErrorArca(
                 f"No se pudo conectar al servicio de facturación de ARCA ({modo}): {exc}"
