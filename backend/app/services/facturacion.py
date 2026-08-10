@@ -38,6 +38,28 @@ class EmisorInvalidoError(ValueError):
     """El CUIT emisor pedido no coincide con el del token/credenciales."""
 
 
+def _emitida_en_modo(db: Session, factura: Factura, modo: str) -> bool:
+    """True si la factura ya fue emitida (o reconciliada) en ESTE modo de ARCA.
+
+    Una factura 'emitida' durante una prueba (mock/homologación) NO debe bloquear una
+    emisión real en producción: se detecta por la auditoría, que guarda el modo de cada
+    operación. Así, re-facturar en producción una liquidación que se había probado en
+    mock vuelve a pedir un CAE real en vez de devolver el comprobante de prueba.
+    """
+    from app.models import AuditoriaArca
+
+    marca = db.scalar(
+        select(AuditoriaArca.id)
+        .where(
+            AuditoriaArca.factura_id == factura.id,
+            AuditoriaArca.modo == modo,
+            AuditoriaArca.resultado.in_(("emitida", "reconciliada")),
+        )
+        .limit(1)
+    )
+    return marca is not None
+
+
 def supera_minimo(importe: Decimal) -> bool:
     """True si el importe supera estrictamente el mínimo para facturar."""
     return Decimal(importe) > get_settings().arca_importe_minimo
@@ -254,7 +276,11 @@ def emitir_factura_directa(
             Factura.emisor_id == emisor.id,
         )
     )
-    if existente is not None and existente.estado == "emitida":
+    if (
+        existente is not None
+        and existente.estado == "emitida"
+        and _emitida_en_modo(db, existente, emisor.arca_mode)
+    ):
         return existente
 
     if emisor_cuit and emisor_cuit != emisor.cuit:
