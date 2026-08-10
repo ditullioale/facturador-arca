@@ -78,9 +78,15 @@ def emisor_por_defecto(db: Session) -> Emisor | None:
 
 
 def emisor_actual(
-    authorization: str | None = Header(default=None), db: Session = Depends(get_db)
+    authorization: str | None = Header(default=None),
+    x_integracion_token: str | None = Header(default=None),
+    db: Session = Depends(get_db),
 ) -> Emisor:
-    """Resuelve el emisor de la request: por token Bearer, o el emisor por defecto."""
+    """Resuelve el emisor de la request: por token Bearer, o el emisor por defecto.
+
+    El emisor por defecto (sin token propio) queda protegido por un secreto compartido:
+    si se configuró FACTURADOR_INTEGRACION_TOKEN, el pedido debe traer el header
+    X-Integracion-Token con ese valor. Si no se configuró, el comportamiento no cambia."""
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
         emisor = db.scalar(
@@ -91,6 +97,14 @@ def emisor_actual(
         if emisor is None:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token de emisor inválido.")
         return emisor
+    # Sin token de emisor: se usa el emisor por defecto, pero protegido por el secreto
+    # compartido (si está configurado) para que el endpoint no quede abierto.
+    secreto = get_settings().facturador_integracion_token
+    if secreto and (x_integracion_token or "") != secreto:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Falta o no coincide el token de integración (X-Integracion-Token).",
+        )
     emisor = emisor_por_defecto(db)
     if emisor is None:
         raise HTTPException(

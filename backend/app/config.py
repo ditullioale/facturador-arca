@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # y token para el endpoint de alta de emisores (lo usa el gestor).
     facturador_secret: str = ""
     facturador_admin_token: str = ""
+    # Secreto compartido con el gestor para el endpoint de integración. El gestor lo
+    # envía como header X-Integracion-Token. Si está seteado, se rechazan los pedidos
+    # anónimos que caerían al emisor por defecto (cierra el endpoint público). Debe
+    # tener el MISMO valor en el gestor (FACTURADOR_INTEGRACION_TOKEN). Vacío = sin verificación.
+    facturador_integracion_token: str = ""
 
     # Domicilio por defecto cuando el padrón de ARCA no informa uno.
     domicilio_default: str = "Arroyo Seco"
