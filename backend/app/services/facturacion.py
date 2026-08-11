@@ -208,7 +208,14 @@ def emitir_factura(
 ) -> Factura:
     """Emite (una sola vez) la factura de una transferencia y persiste el resultado."""
     settings = get_settings()
-    if transferencia.factura is not None and transferencia.factura.estado == "emitida":
+    if (
+        transferencia.factura is not None
+        and transferencia.factura.estado == "emitida"
+        and _emitida_en_modo(db, transferencia.factura, emisor.arca_mode)
+    ):
+        # Ya emitida en ESTE modo (producción real): idempotente, no re-emite.
+        # Si estaba emitida solo en una prueba (mock/homologación), sigue de largo y
+        # vuelve a pedir un CAE real reutilizando la misma fila.
         return transferencia.factura
     if not transferencia.cuit:
         raise SinCuitError(

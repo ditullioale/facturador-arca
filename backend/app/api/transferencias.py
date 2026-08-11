@@ -15,6 +15,7 @@ from app.services.emisores import emisor_actual
 from app.services.facturacion import (
     RequiereConfirmacionError,
     SinCuitError,
+    _emitida_en_modo,
     emitir_factura,
 )
 
@@ -89,6 +90,29 @@ def facturar(
         # 409: el importe no supera el mínimo; reintentar con ?confirmar=true para facturar igual.
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return FacturaOut.model_validate(factura)
+
+
+@router.get("/pendientes-produccion", response_model=list[TransferenciaOut])
+def pendientes_produccion(
+    emisor: Emisor = Depends(emisor_actual),
+    db: Session = Depends(get_db),
+) -> list[TransferenciaOut]:
+    """Transferencias que quedaron facturadas en un modo de PRUEBA (mock/homologación) y
+    todavía no tienen un comprobante real en el modo actual. La UI las re-factura de a una
+    (con el endpoint /facturar de siempre, que ahora re-emite si la que hay es de prueba)."""
+    transferencias = db.scalars(
+        select(Transferencia)
+        .where(
+            Transferencia.emisor_id == emisor.id,
+            Transferencia.estado == "facturada",
+        )
+        .order_by(Transferencia.fecha.desc(), Transferencia.id.desc())
+    ).all()
+    return [
+        TransferenciaOut.model_validate(t)
+        for t in transferencias
+        if t.factura is not None and not _emitida_en_modo(db, t.factura, emisor.arca_mode)
+    ]
 
 
 @router.post("/facturar", response_model=list[ResultadoTransferencia])
