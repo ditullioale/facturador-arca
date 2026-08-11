@@ -10,7 +10,7 @@ from app.schemas import AuditoriaOut, ConfigOut, DatosPadronOut, FacturaOut
 from app.services.arca.wsaa import ErrorArca
 from app.services.cuit import es_cuit_valido, solo_digitos
 from app.services.emisores import emisor_actual
-from app.services.facturacion import consultar_padron
+from app.services.facturacion import consultar_padron, reconciliar_pendientes
 from app.services.representacion import generar_pdf
 
 router = APIRouter(prefix="/api", tags=["facturas"])
@@ -31,6 +31,24 @@ def listar_facturas(
         consulta = consulta.where(Factura.estado == estado)
     consulta = consulta.limit(limit).offset(offset)
     return [FacturaOut.model_validate(f) for f in db.scalars(consulta).all()]
+
+
+@router.post("/facturas/reconciliar", response_model=list[FacturaOut])
+def reconciliar(
+    limite: int = 50,
+    emisor: Emisor = Depends(emisor_actual),
+    db: Session = Depends(get_db),
+) -> list[FacturaOut]:
+    """Retoma las facturas que quedaron en "revisar" por un timeout de ARCA.
+
+    Sin esto, un timeout deja el comprobante posiblemente autorizado en ARCA y no
+    registrado acá, esperando que alguien se acuerde de reintentar. Se consulta con
+    FECompConsultar antes de reemitir, así que no puede duplicar. Pensado para un cron.
+    """
+    return [
+        FacturaOut.model_validate(f)
+        for f in reconciliar_pendientes(db, emisor, limite=max(1, min(limite, 200)))
+    ]
 
 
 @router.get("/auditoria", response_model=list[AuditoriaOut])

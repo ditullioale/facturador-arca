@@ -320,3 +320,35 @@ def emitir_factura_directa(
 
     condicion = condicion_iva_receptor or settings.arca_cond_iva_receptor
     return _emitir_en_arca(db, factura, emisor, condicion)
+
+
+def reconciliar_pendientes(db: Session, emisor: Emisor, limite: int = 50) -> list[Factura]:
+    """Resuelve las facturas que quedaron en "revisar" por un timeout de ARCA.
+
+    Una factura en "revisar" guarda el `numero_intentado`: ARCA pudo haberla autorizado
+    sin que llegara la respuesta. Hasta que alguien la retome queda colgada — el
+    comprobante puede existir allá y no acá. Esto la retoma: `_emitir_en_arca` consulta
+    primero con FECompConsultar y adopta el CAE si ya existía; sólo emite de nuevo cuando
+    confirmó que ese número NO fue autorizado, así que no puede duplicar.
+
+    Pensado para llamarse desde un cron. Devuelve las facturas procesadas con su estado
+    ya actualizado (las que siguen en "revisar" no se pudieron resolver todavía).
+    """
+    condicion = get_settings().arca_cond_iva_receptor
+    pendientes = list(
+        db.scalars(
+            select(Factura)
+            .where(Factura.emisor_id == emisor.id, Factura.estado == "revisar")
+            .order_by(Factura.id)
+            .limit(limite)
+        )
+    )
+    resueltas = []
+    for factura in pendientes:
+        procesada = _emitir_en_arca(db, factura, emisor, condicion)
+        if procesada.estado == "emitida" and procesada.transferencia is not None:
+            procesada.transferencia.estado = "facturada"
+            db.commit()
+            db.refresh(procesada)
+        resueltas.append(procesada)
+    return resueltas

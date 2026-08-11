@@ -10,7 +10,7 @@ os.environ.setdefault("FACTURADOR_SECRET", "secreto-de-test")
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import StaticPool, create_engine  # noqa: E402
-from sqlalchemy.orm import sessionmaker  # noqa: E402
+from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 
 from app import models  # noqa: E402,F401
 from app.db import Base, get_db  # noqa: E402
@@ -18,13 +18,29 @@ from app.main import app  # noqa: E402
 
 
 @pytest.fixture()
-def client() -> Iterator[TestClient]:
-    engine = create_engine(
+def engine():
+    motor = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(motor)
+    yield motor
+    Base.metadata.drop_all(motor)
+
+
+@pytest.fixture()
+def db_session(engine) -> Iterator[Session]:
+    """Sesión contra la misma base que ve el cliente, para preparar datos en un test."""
+    sesion = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+    try:
+        yield sesion
+    finally:
+        sesion.close()
+
+
+@pytest.fixture()
+def client(engine) -> Iterator[TestClient]:
     TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
     def override_get_db():
@@ -38,4 +54,3 @@ def client() -> Iterator[TestClient]:
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
-    Base.metadata.drop_all(engine)
