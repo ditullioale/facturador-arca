@@ -101,7 +101,10 @@ def test_transferencia_mock_no_bloquea_produccion(monkeypatch):
     db.add(AuditoriaArca(factura_id=f.id, emisor_id=emisor.id, operacion="emitir",
                          modo="mock", resultado="emitida")); db.commit()
     llamado = _fake_emitir(monkeypatch)
-    facturacion.emitir_factura(db, t, emisor)
+    res = facturacion.emitir_factura(db, t, emisor)
     assert llamado["n"] == 1
+    # Al re-emitir usa el punto de venta ACTUAL del emisor (7 = producción), no el de la
+    # factura de prueba (1 = mock), que en producción ARCA rechaza.
+    assert res.punto_venta == 7, res.punto_venta
     facturacion.emitir_factura(db, t, emisor)   # idempotente
     assert llamado["n"] == 1

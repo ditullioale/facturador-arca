@@ -238,6 +238,11 @@ def emitir_factura(
     factura.emisor_id = emisor.id
     factura.emisor_cuit = emisor.cuit
     factura.cuit_receptor = transferencia.cuit
+    # Reflejar SIEMPRE la config ACTUAL del emisor. Es clave al re-emitir una factura que
+    # se había generado en prueba: el punto de venta de mock/homologación (p. ej. 1) no
+    # existe en producción y ARCA lo rechaza; hay que usar el de producción (p. ej. 7).
+    factura.tipo_comprobante = emisor.tipo_comprobante
+    factura.punto_venta = emisor.punto_venta
 
     razon_social, domicilio = _padron_seguro(transferencia.cuit, emisor)
     factura.razon_social = razon_social
