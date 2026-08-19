@@ -26,7 +26,11 @@ from app.services.cuit import extraer_cuit, normalizar_cuit
 
 RE_FECHA = re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
 RE_IMPORTE_FINAL = re.compile(
-    r"(-?\$?\s?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|-?\$?\s?\d+[.,]\d{2})\s*$"
+    r"("
+    r"-?\$?\s?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})"  # con miles y decimales: 1.234,56
+    r"|-?\$?\s?\d+[.,]\d{2}"  # simple con decimales: 1234.56
+    r"|-?\$\s?\d{1,3}(?:\.\d{3})+"  # monto redondo con $ y miles, sin decimales: $480.000
+    r")\s*$"
 )
 
 PALABRAS_ENCABEZADO = (
@@ -188,6 +192,13 @@ def _a_decimal(valor: object) -> Decimal | None:
         texto = texto.replace(".", "").replace(",", ".")
     elif "," in texto:
         texto = texto.replace(",", ".")
+    elif "." in texto:
+        # Solo puntos: en es-AR son separadores de miles cuando hay varios
+        # (1.234.567) o cuando el único grupo tiene 3 dígitos y no hay decimales
+        # (480.000 = 480000). Un punto con 1-2 dígitos (1234.56) es decimal.
+        partes = texto.split(".")
+        if len(partes) > 2 or (len(partes) == 2 and len(partes[1]) == 3):
+            texto = texto.replace(".", "")
     try:
         monto = Decimal(texto).quantize(Decimal("0.01"))
     except InvalidOperation:
@@ -241,10 +252,21 @@ def _movimiento(fecha: date, importe: Decimal, descripcion: str) -> MovimientoPa
     )
 
 
+def _es_linea_movimiento(linea: str) -> bool:
+    """La línea tiene fecha e importe juntos (es la fila del movimiento)."""
+    return RE_FECHA.search(linea) is not None and _importe_final(linea) is not None
+
+
 def _movimientos_en_linea(lineas: list[str]) -> list[MovimientoParseado]:
-    """PDF con una fila por línea: fecha, descripción e importe juntos."""
+    """PDF con una fila por línea.
+
+    Cubre dos variantes: la fecha, descripción e importe en la misma línea, y el
+    formato tipo Santander donde la línea del importe trae sólo fecha y monto y el
+    concepto/detalle (con el CUIT) quedan en las líneas de arriba y abajo.
+    """
     movimientos: list[MovimientoParseado] = []
-    for linea in lineas:
+    total = len(lineas)
+    for indice, linea in enumerate(lineas):
         match_fecha = RE_FECHA.search(linea)
         partido = _importe_final(linea)
         if match_fecha is None or partido is None:
@@ -254,6 +276,13 @@ def _movimientos_en_linea(lineas: list[str]) -> list[MovimientoParseado]:
             continue
         importe, resto = partido
         descripcion = _sin_fechas(resto)
+        if not descripcion:
+            contexto = []
+            if indice > 0 and not _es_linea_movimiento(lineas[indice - 1]):
+                contexto.append(lineas[indice - 1])
+            if indice + 1 < total and not _es_linea_movimiento(lineas[indice + 1]):
+                contexto.append(lineas[indice + 1])
+            descripcion = _sin_fechas(" ".join(contexto))
         movimiento = _movimiento(fecha, importe, descripcion)
         if movimiento is not None:
             movimientos.append(movimiento)

@@ -9,6 +9,7 @@ from tests.factories import (
     resumen_macro,
     resumen_pdf_en_linea,
     resumen_pdf_por_columnas,
+    resumen_pdf_santander_online,
     resumen_santander,
 )
 
@@ -59,6 +60,21 @@ def test_parsea_pdf_con_una_fila_por_linea():
     descripciones = " ".join(m.descripcion.lower() for m in resultado.movimientos)
     assert "inmediata a proveedor" not in descripciones
     assert "comision" not in descripciones
+
+
+def test_parsea_pdf_santander_online_con_montos_redondos():
+    """Online Banking Santander: importe redondo ($480.000) con concepto arriba y
+    detalle/CUIT en la línea de abajo. Débitos y compras quedan afuera."""
+    resultado = parsear_resumen(resumen_pdf_santander_online(), "santander agosto.pdf")
+
+    assert resultado.banco == "santander"
+    assert len(resultado.movimientos) == 2
+    primero, segundo = resultado.movimientos
+    assert (primero.importe, primero.cuit) == (Decimal("480000.00"), "20315847452")
+    assert primero.fecha.isoformat() == "2026-08-18"
+    assert (segundo.importe, segundo.cuit) == (Decimal("240000.00"), "20244028102")
+    descripciones = " ".join(m.descripcion.lower() for m in resultado.movimientos)
+    assert "debito" not in descripciones
 
 
 def test_parsea_pdf_impreso_desde_planilla_ancha():

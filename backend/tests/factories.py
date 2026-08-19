@@ -58,6 +58,31 @@ def resumen_pdf_en_linea() -> bytes:
     )
 
 
+def resumen_pdf_santander_online() -> bytes:
+    """PDF del Online Banking Santander: la fila del importe trae sólo fecha y monto
+    (redondo, sin decimales), con el concepto arriba y el detalle con CUIT abajo."""
+    return pdf_con_lineas(
+        [
+            [
+                "Banco Santander",
+                "Fecha Descripcion Importe",
+                "Transf recibida cvu dif titular",
+                "18/08/2026 $480.000",
+                "De jesica valeria scribantti / mercado pago / 20315847452",
+                "Compra con tarjeta de debito",
+                "18/08/2026 -$40.000,03",
+                "Axion arroyo seco - tarj nro. 2624",
+                "Transferencia recibida",
+                "17/08/2026 $240.000",
+                "De david adrian lannutti / var / 20244028102",
+                "Compra con tarjeta de debito",
+                "17/08/2026 -$150.000",
+                "Merpago supermercado - tarj nro. 2624",
+            ]
+        ]
+    )
+
+
 def resumen_pdf_por_columnas() -> bytes:
     """PDF impreso desde una planilla ancha: cada bloque de páginas trae una columna."""
     return pdf_con_lineas(
