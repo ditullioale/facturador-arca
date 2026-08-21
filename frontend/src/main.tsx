@@ -12,7 +12,7 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWind
 
 function Raiz() {
   const [modo, setModo] = useState<Modo>(
-    () => (localStorage.getItem(CLAVE_TEMA) as Modo | null) ?? 'oscuro',
+    () => (localStorage.getItem(CLAVE_TEMA) as Modo | null) ?? 'claro',
   )
   const tema = useMemo(() => crearTema(modo), [modo])
 

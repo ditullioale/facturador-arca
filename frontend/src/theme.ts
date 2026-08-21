@@ -12,15 +12,16 @@ const oscuro = {
 }
 
 const claro = {
-  bg: '#f6f7f9',
+  bg: '#f7f8fa',
   surface: '#ffffff',
-  surface2: '#f7f8fa',
-  line: '#e3e6ec',
-  tx: '#141821',
-  tx2: '#525a6b',
+  surface2: '#f2f4f7',
+  line: '#e4e7ec',
+  tx: '#101828',
+  tx2: '#5a6478',
 }
 
-const acento = '#7c6cff'
+/** El violeta del modo oscuro sobre blanco no llega a 4.5:1 con texto blanco encima. */
+const acento = { oscuro: '#7c6cff', claro: '#5b4fd6' }
 
 export type Modo = 'oscuro' | 'claro'
 
@@ -31,11 +32,11 @@ export function crearTema(modo: Modo): Theme {
   return createTheme({
     palette: {
       mode: esOscuro ? 'dark' : 'light',
-      primary: { main: acento, light: '#9d92ff' },
-      success: { main: '#31c48d' },
-      warning: { main: '#e8b339' },
-      error: { main: '#f2555a' },
-      info: { main: '#48a9f8' },
+      primary: { main: esOscuro ? acento.oscuro : acento.claro, light: '#9d92ff' },
+      success: { main: esOscuro ? '#31c48d' : '#12805c' },
+      warning: { main: esOscuro ? '#e8b339' : '#a56a08' },
+      error: { main: esOscuro ? '#f2555a' : '#c62c33' },
+      info: { main: esOscuro ? '#48a9f8' : '#1a72c4' },
       background: { default: c.bg, paper: c.surface },
       text: { primary: c.tx, secondary: c.tx2 },
       divider: c.line,
@@ -53,7 +54,7 @@ export function crearTema(modo: Modo): Theme {
         styleOverrides: {
           body: {
             backgroundImage: `radial-gradient(900px 300px at 22% -140px, rgba(124,108,255,${
-              esOscuro ? 0.14 : 0.1
+              esOscuro ? 0.14 : 0.06
             }), transparent 70%)`,
             backgroundAttachment: 'fixed',
           },
