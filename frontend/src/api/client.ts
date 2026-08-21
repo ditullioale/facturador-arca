@@ -46,6 +46,14 @@ export interface ResultadoImportacion {
   transferencias: Transferencia[]
 }
 
+export interface ResultadoTransferencia {
+  transferencia_id: number
+  /** emitida | error | revisar | sin_cuit | requiere_confirmacion */
+  estado: string
+  mensaje: string | null
+  factura: Factura | null
+}
+
 export interface Configuracion {
   arca_mode: string
   arca_cuit: string
@@ -61,8 +69,17 @@ export async function getConfig(): Promise<Configuracion> {
   return data
 }
 
-export async function getTransferencias(): Promise<Transferencia[]> {
-  const { data } = await api.get<Transferencia[]>('/transferencias')
+export async function getTransferencias(
+  filtros: { estado?: string; q?: string; limit?: number; offset?: number } = {},
+): Promise<Transferencia[]> {
+  const { data } = await api.get<Transferencia[]>('/transferencias', { params: filtros })
+  return data
+}
+
+export async function getFacturas(
+  filtros: { estado?: string; q?: string; limit?: number; offset?: number } = {},
+): Promise<Factura[]> {
+  const { data } = await api.get<Factura[]>('/facturas', { params: filtros })
   return data
 }
 
@@ -84,12 +101,31 @@ export async function actualizarTransferencia(
 export async function facturar(
   ids: number[],
   confirmarBajoMinimo = false,
-): Promise<Factura[]> {
-  const { data } = await api.post<Factura[]>('/transferencias/facturar', {
+): Promise<ResultadoTransferencia[]> {
+  const { data } = await api.post<ResultadoTransferencia[]>('/transferencias/facturar', {
     transferencia_ids: ids,
     confirmar_bajo_minimo: confirmarBajoMinimo,
   })
   return data
+}
+
+/** Pydantic antepone "Value error, " al mensaje de los validadores. */
+function limpiar(mensaje: string): string {
+  return mensaje.replace(/^Value error,\s*/, '')
+}
+
+/** Mensaje legible de un error de axios, sin `[object Object]`. */
+export function mensajeDeError(error: unknown, porDefecto: string): string {
+  const detalle = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (typeof detalle === 'string') return limpiar(detalle)
+  if (Array.isArray(detalle)) {
+    const textos = detalle
+      .map((d) => (typeof d === 'string' ? d : (d as { msg?: string })?.msg))
+      .filter(Boolean)
+      .map((t) => limpiar(String(t)))
+    if (textos.length > 0) return textos.join('. ')
+  }
+  return porDefecto
 }
 
 /** URL de la representación impresa (PDF con QR de AFIP) de una factura emitida. */

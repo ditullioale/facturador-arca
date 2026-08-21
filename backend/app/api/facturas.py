@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import cast, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.types import String
 
 from app.config import get_settings
 from app.db import get_db
@@ -19,6 +20,7 @@ router = APIRouter(prefix="/api", tags=["facturas"])
 @router.get("/facturas", response_model=list[FacturaOut])
 def listar_facturas(
     estado: str | None = None,
+    q: str | None = None,
     limit: int = 50,
     offset: int = 0,
     emisor: Emisor = Depends(emisor_actual),
@@ -29,6 +31,21 @@ def listar_facturas(
     consulta = select(Factura).where(Factura.emisor_id == emisor.id).order_by(Factura.id.desc())
     if estado:
         consulta = consulta.where(Factura.estado == estado)
+    if q and q.strip():
+        texto = q.strip()
+        patron = f"%{texto}%"
+        # "0001-00000008" se muestra formateado pero en la base el número es 8.
+        numero = texto.split("-")[-1].lstrip("0")
+        condiciones = [
+            Factura.cuit_receptor.ilike(patron),
+            Factura.razon_social.ilike(patron),
+            Factura.cae.ilike(patron),
+            Factura.referencia_externa.ilike(patron),
+            cast(Factura.numero, String).ilike(patron),
+        ]
+        if numero.isdigit():
+            condiciones.append(Factura.numero == int(numero))
+        consulta = consulta.where(or_(*condiciones))
     consulta = consulta.limit(limit).offset(offset)
     return [FacturaOut.model_validate(f) for f in db.scalars(consulta).all()]
 
