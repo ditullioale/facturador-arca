@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import cast, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.types import String
 
 from app.db import get_db
 from app.models import Emisor, Transferencia
@@ -33,6 +34,7 @@ def _obtener(db: Session, transferencia_id: int, emisor: Emisor) -> Transferenci
 def listar(
     estado: str | None = None,
     lote_id: int | None = None,
+    q: str | None = None,
     limit: int = 50,
     offset: int = 0,
     emisor: Emisor = Depends(emisor_actual),
@@ -49,6 +51,16 @@ def listar(
         consulta = consulta.where(Transferencia.estado == estado)
     if lote_id:
         consulta = consulta.where(Transferencia.lote_id == lote_id)
+    if q and q.strip():
+        patron = f"%{q.strip()}%"
+        consulta = consulta.where(
+            or_(
+                Transferencia.cuit.ilike(patron),
+                Transferencia.razon_social.ilike(patron),
+                Transferencia.descripcion.ilike(patron),
+                cast(Transferencia.importe, String).ilike(patron),
+            )
+        )
     consulta = consulta.limit(limit).offset(offset)
     return [TransferenciaOut.model_validate(t) for t in db.scalars(consulta).all()]
 

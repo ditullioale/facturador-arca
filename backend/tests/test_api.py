@@ -122,3 +122,26 @@ def test_config_expone_parametros_de_facturacion(client):
     assert config["concepto_descripcion"] == "HONORARIOS PROFESIONALES"
     assert config["domicilio_default"] == "Arroyo Seco"
     assert config["arca_mode"] == "mock"
+
+
+def test_buscar_transferencias_en_el_servidor(client):
+    """La búsqueda tiene que mirar toda la tabla, no sólo la página que ya se trajo."""
+    datos = _subir(client, resumen_santander(), "santander.xlsx").json()
+    con_cuit = next(t for t in datos["transferencias"] if t["cuit"])
+
+    encontradas = client.get("/api/transferencias", params={"q": con_cuit["cuit"]}).json()
+    assert [t["id"] for t in encontradas] == [con_cuit["id"]]
+
+    assert client.get("/api/transferencias", params={"q": "no existe"}).json() == []
+
+
+def test_buscar_facturas_por_cae_y_por_numero_formateado(client):
+    datos = _subir(client, resumen_macro(), "macro.xlsx").json()
+    factura = client.post(f"/api/transferencias/{datos['transferencias'][0]['id']}/facturar").json()
+
+    por_cae = client.get("/api/facturas", params={"q": factura["cae"]}).json()
+    assert [f["id"] for f in por_cae] == [factura["id"]]
+
+    formateado = f"{factura['punto_venta']:04d}-{factura['numero']:08d}"
+    por_numero = client.get("/api/facturas", params={"q": formateado}).json()
+    assert [f["id"] for f in por_numero] == [factura["id"]]

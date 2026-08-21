@@ -30,6 +30,18 @@ export default function App({ modo, alternarTema }: Props) {
   const [seccion, setSeccion] = useState<'transferencias' | 'facturas'>('transferencias')
   const enProduccion = config?.arca_mode === 'produccion'
 
+  const solapas = (ancho: boolean) => (
+    <Tabs
+      value={seccion}
+      onChange={(_e, v) => setSeccion(v)}
+      variant={ancho ? 'fullWidth' : 'standard'}
+      sx={{ flexGrow: 1, minWidth: 0, '& .MuiTabs-indicator': { height: 2 } }}
+    >
+      <Tab value="transferencias" label="Transferencias" />
+      <Tab value="facturas" label="Facturas emitidas" />
+    </Tabs>
+  )
+
   return (
     <>
       <AppBar position="sticky">
@@ -45,14 +57,10 @@ export default function App({ modo, alternarTema }: Props) {
             />
             <Typography sx={{ fontWeight: 600, letterSpacing: '-0.01em' }}>Facturador</Typography>
           </Stack>
-          <Tabs
-            value={seccion}
-            onChange={(_e, v) => setSeccion(v)}
-            sx={{ flexGrow: 1, '& .MuiTabs-indicator': { height: 2 } }}
-          >
-            <Tab value="transferencias" label="Transferencias" />
-            <Tab value="facturas" label="Facturas emitidas" />
-          </Tabs>
+          <Box sx={{ display: { xs: 'none', sm: 'flex' }, flexGrow: 1, minWidth: 0 }}>
+            {solapas(false)}
+          </Box>
+          <Box sx={{ flexGrow: { xs: 1, sm: 0 } }} />
           {config && (
             <Stack direction="row" spacing={1} alignItems="center">
               <Chip
@@ -79,6 +87,9 @@ export default function App({ modo, alternarTema }: Props) {
             </IconButton>
           </Tooltip>
         </Toolbar>
+        <Box sx={{ display: { xs: 'block', sm: 'none' }, borderTop: 1, borderColor: 'divider' }}>
+          {solapas(true)}
+        </Box>
       </AppBar>
       <Container maxWidth="xl" sx={{ py: 3 }}>
         <Stack spacing={2.5}>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Alert from '@mui/material/Alert'
 import AlertTitle from '@mui/material/AlertTitle'
@@ -44,6 +44,7 @@ import {
   type ResultadoTransferencia,
   type Transferencia,
 } from '../api/client'
+import { useDebounce } from '../hooks/useDebounce'
 
 const moneda = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' })
 const POR_PAGINA = 50
@@ -107,11 +108,19 @@ export default function TablaTransferencias({ importeMinimo, concepto }: Props) 
   const [aConfirmar, setAConfirmar] = useState<Transferencia[] | null>(null)
   const [resultados, setResultados] = useState<ResultadoTransferencia[] | null>(null)
 
-  const { data: transferencias = [], isLoading } = useQuery({
-    queryKey: ['transferencias', filtro, pagina],
+  const busquedaDiferida = useDebounce(busqueda.trim())
+
+  useEffect(() => {
+    setPagina(0)
+    setSeleccion([])
+  }, [busquedaDiferida])
+
+  const { data: visibles = [], isLoading } = useQuery({
+    queryKey: ['transferencias', filtro, pagina, busquedaDiferida],
     queryFn: () =>
       getTransferencias({
         estado: filtro === 'todas' ? undefined : filtro,
+        q: busquedaDiferida || undefined,
         limit: POR_PAGINA,
         offset: pagina * POR_PAGINA,
       }),
@@ -135,16 +144,6 @@ export default function TablaTransferencias({ importeMinimo, concepto }: Props) 
     },
   })
 
-  const visibles = useMemo(() => {
-    const q = busqueda.trim().toLowerCase()
-    if (!q) return transferencias
-    return transferencias.filter((t) =>
-      [t.cuit, t.razon_social, t.descripcion, t.importe]
-        .filter(Boolean)
-        .some((campo) => String(campo).toLowerCase().includes(q)),
-    )
-  }, [transferencias, busqueda])
-
   const facturables = visibles.filter(
     (t) => t.estado === 'pendiente' && t.cuit && t.factura?.estado !== 'emitida',
   )
@@ -156,7 +155,7 @@ export default function TablaTransferencias({ importeMinimo, concepto }: Props) 
   }
 
   const emitirSeleccion = () => {
-    const bajoMinimo = transferencias.filter((t) => seleccion.includes(t.id) && !t.supera_minimo)
+    const bajoMinimo = visibles.filter((t) => seleccion.includes(t.id) && !t.supera_minimo)
     if (bajoMinimo.length > 0) {
       setAConfirmar(bajoMinimo)
       return
@@ -166,7 +165,7 @@ export default function TablaTransferencias({ importeMinimo, concepto }: Props) 
 
   const emitidas = resultados?.filter((r) => r.estado === 'emitida') ?? []
   const omitidas = resultados?.filter((r) => r.estado !== 'emitida') ?? []
-  const totalSeleccionado = transferencias
+  const totalSeleccionado = visibles
     .filter((t) => seleccion.includes(t.id))
     .reduce((suma, t) => suma + Number(t.importe), 0)
 
@@ -224,6 +223,8 @@ export default function TablaTransferencias({ importeMinimo, concepto }: Props) 
         <Tabs
           value={filtro}
           onChange={(_e, v: Filtro) => cambiarFiltro(v)}
+          variant="scrollable"
+          allowScrollButtonsMobile
           sx={{ mt: 1, borderBottom: 1, borderColor: 'divider' }}
         >
           <Tab value="pendiente" label="Pendientes" />
@@ -402,7 +403,6 @@ export default function TablaTransferencias({ importeMinimo, concepto }: Props) 
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 2 }}>
           <Typography variant="caption" color="text.secondary">
             {visibles.length} en pantalla
-            {busqueda && ` de ${transferencias.length} traídas`}
           </Typography>
           <Stack direction="row" spacing={1}>
             <Button
@@ -417,7 +417,7 @@ export default function TablaTransferencias({ importeMinimo, concepto }: Props) 
             </Button>
             <Button
               size="small"
-              disabled={transferencias.length < POR_PAGINA}
+              disabled={visibles.length < POR_PAGINA}
               onClick={() => {
                 setPagina((p) => p + 1)
                 setSeleccion([])

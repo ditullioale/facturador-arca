@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
@@ -23,6 +23,7 @@ import Typography from '@mui/material/Typography'
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf'
 import SearchIcon from '@mui/icons-material/Search'
 import { facturaPdfUrl, getFacturas, type Factura } from '../api/client'
+import { useDebounce } from '../hooks/useDebounce'
 
 const moneda = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' })
 const POR_PAGINA = 50
@@ -57,25 +58,22 @@ export default function FacturasEmitidas() {
   const [busqueda, setBusqueda] = useState('')
   const [pagina, setPagina] = useState(0)
 
-  const { data: facturas = [], isLoading } = useQuery({
-    queryKey: ['facturas', filtro, pagina],
+  const busquedaDiferida = useDebounce(busqueda.trim())
+
+  useEffect(() => {
+    setPagina(0)
+  }, [busquedaDiferida])
+
+  const { data: visibles = [], isLoading } = useQuery({
+    queryKey: ['facturas', filtro, pagina, busquedaDiferida],
     queryFn: () =>
       getFacturas({
         estado: filtro === 'todas' ? undefined : filtro,
+        q: busquedaDiferida || undefined,
         limit: POR_PAGINA,
         offset: pagina * POR_PAGINA,
       }),
   })
-
-  const visibles = useMemo(() => {
-    const q = busqueda.trim().toLowerCase()
-    if (!q) return facturas
-    return facturas.filter((f) =>
-      [f.cuit_receptor, f.razon_social, f.cae, f.referencia_externa, numero(f)]
-        .filter(Boolean)
-        .some((campo) => String(campo).toLowerCase().includes(q)),
-    )
-  }, [facturas, busqueda])
 
   return (
     <Card>
@@ -110,6 +108,8 @@ export default function FacturasEmitidas() {
             setFiltro(v)
             setPagina(0)
           }}
+          variant="scrollable"
+          allowScrollButtonsMobile
           sx={{ mt: 1, borderBottom: 1, borderColor: 'divider' }}
         >
           <Tab value="emitida" label="Emitidas" />
@@ -198,7 +198,7 @@ export default function FacturasEmitidas() {
             </Button>
             <Button
               size="small"
-              disabled={facturas.length < POR_PAGINA}
+              disabled={visibles.length < POR_PAGINA}
               onClick={() => setPagina((p) => p + 1)}
             >
               Siguientes

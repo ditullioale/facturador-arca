@@ -8,7 +8,7 @@ Cubre tres comportamientos clave para no bloquear la emisión real:
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import StaticPool, create_engine, select
+from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
@@ -43,7 +43,9 @@ def test_emisor_por_defecto_sincroniza_modo(monkeypatch):
 def _emisor_prod(db):
     e = Emisor(cuit="20305903990", punto_venta=7, tipo_comprobante=11,
                arca_mode="produccion", consultar_padron=False, por_defecto=True, activo=True)
-    db.add(e); db.commit(); db.refresh(e)
+    db.add(e)
+    db.commit()
+    db.refresh(e)
     return e
 
 
@@ -52,10 +54,13 @@ def _fake_emitir(monkeypatch):
 
     def fake(db, factura, emisor, cond):
         llamado["n"] += 1
-        factura.estado = "emitida"; factura.cae = "86327784730732"; factura.numero = 1
+        factura.estado = "emitida"
+        factura.cae = "86327784730732"
+        factura.numero = 1
         db.add(AuditoriaArca(factura_id=factura.id, emisor_id=emisor.id, operacion="emitir",
                              modo=emisor.arca_mode, resultado="emitida"))
-        db.commit(); db.refresh(factura)
+        db.commit()
+        db.refresh(factura)
         return factura
 
     monkeypatch.setattr(facturacion, "_emitir_en_arca", fake)
@@ -63,15 +68,19 @@ def _fake_emitir(monkeypatch):
 
 
 def test_liquidacion_mock_no_bloquea_produccion(monkeypatch):
-    db = _db(); emisor = _emisor_prod(db)
+    db = _db()
+    emisor = _emisor_prod(db)
     ref = "gestor:1:julio"
     f = Factura(emisor_id=emisor.id, origen="gestor_alquileres", referencia_externa=ref,
                 cuit_receptor="20111111112", concepto_descripcion="HON", tipo_comprobante=11,
                 punto_venta=1, importe=Decimal("60000"), fecha_comprobante=date.today(),
                 cae="70000000000001", estado="emitida")
-    db.add(f); db.commit(); db.refresh(f)
+    db.add(f)
+    db.commit()
+    db.refresh(f)
     db.add(AuditoriaArca(factura_id=f.id, emisor_id=emisor.id, operacion="emitir",
-                         modo="mock", resultado="emitida")); db.commit()
+                         modo="mock", resultado="emitida"))
+    db.commit()
     assert facturacion._emitida_en_modo(db, f, "produccion") is False
     llamado = _fake_emitir(monkeypatch)
     facturacion.emitir_factura_directa(db, emisor, receptor_cuit="20111111112",
@@ -86,20 +95,28 @@ def test_liquidacion_mock_no_bloquea_produccion(monkeypatch):
 
 
 def test_transferencia_mock_no_bloquea_produccion(monkeypatch):
-    db = _db(); emisor = _emisor_prod(db)
+    db = _db()
+    emisor = _emisor_prod(db)
     lote = Lote(emisor_id=emisor.id, nombre_archivo="julio.xlsx", banco="X")
-    db.add(lote); db.commit(); db.refresh(lote)
+    db.add(lote)
+    db.commit()
+    db.refresh(lote)
     t = Transferencia(lote_id=lote.id, emisor_id=emisor.id, banco="X", fecha=date.today(),
                       cuit="20111111112", importe=Decimal("80000"), descripcion="hon",
                       huella="h1", estado="facturada")
-    db.add(t); db.commit(); db.refresh(t)
+    db.add(t)
+    db.commit()
+    db.refresh(t)
     f = Factura(transferencia_id=t.id, emisor_id=emisor.id, origen="resumen_bancario",
                 cuit_receptor="20111111112", concepto_descripcion="HON", tipo_comprobante=11,
                 punto_venta=1, importe=Decimal("80000"), fecha_comprobante=date.today(),
                 cae="70000000000009", estado="emitida")
-    db.add(f); db.commit(); db.refresh(f)
+    db.add(f)
+    db.commit()
+    db.refresh(f)
     db.add(AuditoriaArca(factura_id=f.id, emisor_id=emisor.id, operacion="emitir",
-                         modo="mock", resultado="emitida")); db.commit()
+                         modo="mock", resultado="emitida"))
+    db.commit()
     llamado = _fake_emitir(monkeypatch)
     res = facturacion.emitir_factura(db, t, emisor)
     assert llamado["n"] == 1

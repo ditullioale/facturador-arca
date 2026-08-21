@@ -70,14 +70,14 @@ export async function getConfig(): Promise<Configuracion> {
 }
 
 export async function getTransferencias(
-  filtros: { estado?: string; limit?: number; offset?: number } = {},
+  filtros: { estado?: string; q?: string; limit?: number; offset?: number } = {},
 ): Promise<Transferencia[]> {
   const { data } = await api.get<Transferencia[]>('/transferencias', { params: filtros })
   return data
 }
 
 export async function getFacturas(
-  filtros: { estado?: string; limit?: number; offset?: number } = {},
+  filtros: { estado?: string; q?: string; limit?: number; offset?: number } = {},
 ): Promise<Factura[]> {
   const { data } = await api.get<Factura[]>('/facturas', { params: filtros })
   return data
@@ -109,14 +109,20 @@ export async function facturar(
   return data
 }
 
+/** Pydantic antepone "Value error, " al mensaje de los validadores. */
+function limpiar(mensaje: string): string {
+  return mensaje.replace(/^Value error,\s*/, '')
+}
+
 /** Mensaje legible de un error de axios, sin `[object Object]`. */
 export function mensajeDeError(error: unknown, porDefecto: string): string {
   const detalle = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-  if (typeof detalle === 'string') return detalle
+  if (typeof detalle === 'string') return limpiar(detalle)
   if (Array.isArray(detalle)) {
     const textos = detalle
       .map((d) => (typeof d === 'string' ? d : (d as { msg?: string })?.msg))
       .filter(Boolean)
+      .map((t) => limpiar(String(t)))
     if (textos.length > 0) return textos.join('. ')
   }
   return porDefecto
