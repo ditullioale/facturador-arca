@@ -2,6 +2,7 @@
 
 Lo llama el gestor (server-to-server) cuando una inmobiliaria carga su certificado.
 """
+import secrets
 from datetime import date
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/api/emisores", tags=["emisores"])
 
 def _requiere_admin(x_admin_token: str | None = Header(default=None)) -> None:
     esperado = get_settings().facturador_admin_token
-    if not esperado or x_admin_token != esperado:
+    if not esperado or not secrets.compare_digest(x_admin_token or "", esperado):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token de administrador inválido.")
 
 
