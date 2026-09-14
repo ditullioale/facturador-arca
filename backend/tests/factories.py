@@ -28,6 +28,35 @@ def resumen_santander() -> bytes:
     return _a_bytes(wb)
 
 
+def resumen_santander_select() -> bytes:
+    """Export "Santander Select" (caja de ahorro): trae filas de metadatos arriba y
+    el movimiento CON SIGNO en la columna de la cuenta ("Caja de Ahorro"), no en una
+    columna "Crédito". Positivo = crédito recibido; negativo = débito."""
+    wb = Workbook()
+    hoja = wb.active
+    hoja.append(["Santander Select"])
+    hoja.append([])
+    hoja.append(["Cuenta", "Cuenta unica 060-360920/4"])
+    hoja.append(["Moneda", "Pesos"])
+    hoja.append(["Fecha", "31/08/2026 - 14/09/2026"])
+    hoja.append([])
+    hoja.append(["Ultimos movimientos"])
+    hoja.append(
+        ["Fecha", "Sucursal origen", "Descripcion", "Referencia",
+         "Caja de Ahorro", "Cuenta Corriente", "Saldo"]
+    )
+    hoja.append(["14/09/2026", "000 - CASA CENTRAL - WORK CAFE",
+                 "Transferencia recibida De perez sa / - var / 20-30567890-3",
+                 "68275792", "150000.50", "", "2406533.31"])
+    hoja.append(["14/09/2026", "464 - ARROYO SECO",
+                 "Compra con tarjeta de debito Merpago*arroyodual - tarj nro. 2624",
+                 "11796107", "-59999.99", "", "2346533.32"])
+    hoja.append(["14/09/2026", "000 - CASA CENTRAL - WORK CAFE",
+                 "Transferencia recibida De gomez ana / - var / 27-12345678-0",
+                 "49809129", "240000.00", "", "2646533.31"])
+    return _a_bytes(wb)
+
+
 def pdf_con_lineas(paginas: list[list[str]]) -> bytes:
     buffer = io.BytesIO()
     lienzo = canvas.Canvas(buffer, pagesize=A4)

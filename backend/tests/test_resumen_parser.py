@@ -11,6 +11,7 @@ from tests.factories import (
     resumen_pdf_por_columnas,
     resumen_pdf_santander_online,
     resumen_santander,
+    resumen_santander_select,
 )
 
 
@@ -25,6 +26,21 @@ def test_parsea_transferencias_recibidas_de_santander():
     assert primero.fecha.isoformat() == "2026-07-01"
     # El movimiento sin CUIT se importa igual para que el usuario lo complete.
     assert resultado.movimientos[2].cuit is None
+
+
+def test_parsea_santander_select_con_columna_caja_de_ahorro():
+    """Santander Select trae el importe (con signo) en la columna "Caja de Ahorro",
+    con filas de metadatos arriba. Los créditos positivos se toman; los débitos no."""
+    resultado = parsear_resumen(resumen_santander_select(), "movimientos.xlsx")
+
+    assert resultado.banco == "santander"
+    assert len(resultado.movimientos) == 2
+    assert [m.cuit for m in resultado.movimientos] == ["20305678903", "27123456780"]
+    assert resultado.movimientos[0].importe == Decimal("150000.50")
+    assert resultado.movimientos[1].importe == Decimal("240000.00")
+    # El débito (Caja de Ahorro negativo) queda afuera.
+    descripciones = " ".join(m.descripcion.lower() for m in resultado.movimientos)
+    assert "tarjeta de debito" not in descripciones
 
 
 def test_ignora_debitos_y_comisiones():

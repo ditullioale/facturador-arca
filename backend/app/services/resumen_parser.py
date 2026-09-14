@@ -170,6 +170,16 @@ def _mapear_columnas(encabezados: list[str]) -> dict[str, list[int]]:
             mapa["debito"].append(idx)
         elif "importe" in encabezado or "monto" in encabezado:
             mapa["importe"].append(idx)
+        elif (
+            "caja de ahorro" in encabezado
+            or "caja ahorro" in encabezado
+            or "cuenta corriente" in encabezado
+            or "cta cte" in encabezado
+        ):
+            # Santander exporta el movimiento (con signo) en la columna de la
+            # cuenta: "Caja de Ahorro" / "Cuenta Corriente". Positivo = crédito
+            # recibido, negativo = débito (se descarta después por importe <= 0).
+            mapa["importe"].append(idx)
         elif any(p in encabezado for p in PALABRAS_DESCRIPCION):
             mapa["descripcion"].append(idx)
     return mapa
